@@ -4,30 +4,50 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/auth'
 
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { kind: 'awaiting-code' }
+  | { kind: 'verifying' }
+  | { kind: 'error'; message: string }
+
 export function LoginPage() {
-  const { session, loading, sendMagicLink } = useAuth()
+  const { session, loading, sendOtp, verifyOtp } = useAuth()
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<
-    | { kind: 'idle' }
-    | { kind: 'sending' }
-    | { kind: 'sent' }
-    | { kind: 'error'; message: string }
-  >({ kind: 'idle' })
+  const [code, setCode] = useState('')
+  const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
   if (loading) return null
   if (session) return <Navigate to="/now" replace />
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSendOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!email) return
     setStatus({ kind: 'sending' })
-    const { error } = await sendMagicLink(email)
+    const { error } = await sendOtp(email)
     if (error) {
       setStatus({ kind: 'error', message: error.message })
       return
     }
-    setStatus({ kind: 'sent' })
+    setStatus({ kind: 'awaiting-code' })
   }
+
+  async function onVerifyOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!code) return
+    setStatus({ kind: 'verifying' })
+    const { error } = await verifyOtp(email, code)
+    if (error) {
+      setStatus({ kind: 'error', message: error.message })
+      return
+    }
+    // Auth state listener will navigate via the <Navigate> above.
+  }
+
+  const awaitingCode =
+    status.kind === 'awaiting-code' ||
+    status.kind === 'verifying' ||
+    (status.kind === 'error' && code.length > 0)
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-background px-6">
@@ -37,36 +57,65 @@ export function LoginPage() {
           Keep every open loop in motion.
         </p>
 
-        <form onSubmit={onSubmit} className="mt-6 space-y-3">
-          <Input
-            type="email"
-            required
-            autoFocus
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={status.kind === 'sending' || status.kind === 'sent'}
-          />
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={
-              !email ||
-              status.kind === 'sending' ||
-              status.kind === 'sent'
-            }
-          >
-            {status.kind === 'sending'
-              ? 'Sending…'
-              : status.kind === 'sent'
-                ? 'Magic link sent'
-                : 'Send magic link'}
-          </Button>
-        </form>
+        {!awaitingCode ? (
+          <form onSubmit={onSendOtp} className="mt-6 space-y-3">
+            <Input
+              type="email"
+              required
+              autoFocus
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={status.kind === 'sending'}
+            />
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!email || status.kind === 'sending'}
+            >
+              {status.kind === 'sending' ? 'Sending…' : 'Send code'}
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={onVerifyOtp} className="mt-6 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              We sent a 6-digit code to <span className="font-medium">{email}</span>.
+            </p>
+            <Input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              required
+              autoFocus
+              placeholder="123456"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              disabled={status.kind === 'verifying'}
+            />
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={code.length !== 6 || status.kind === 'verifying'}
+            >
+              {status.kind === 'verifying' ? 'Verifying…' : 'Verify code'}
+            </Button>
+            <button
+              type="button"
+              className="w-full text-xs text-muted-foreground underline"
+              onClick={() => {
+                setCode('')
+                setStatus({ kind: 'idle' })
+              }}
+            >
+              Use a different email
+            </button>
+          </form>
+        )}
 
-        {status.kind === 'sent' ? (
+        {status.kind === 'awaiting-code' ? (
           <p className="mt-4 text-xs text-muted-foreground">
-            Check your devtools console for the magic link, or open Inbucket at{' '}
+            Check your devtools console for the code, or open Mailpit at{' '}
             <a
               className="underline"
               href="http://127.0.0.1:54424"

@@ -8,13 +8,17 @@ import {
 } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { logMagicLinkToConsole } from '@/lib/devMagicLink'
+import { logOtpToConsole } from '@/lib/devOtp'
 
 type AuthContextValue = {
   session: Session | null
   user: User | null
   loading: boolean
-  sendMagicLink: (email: string) => Promise<{ error: Error | null }>
+  sendOtp: (email: string) => Promise<{ error: Error | null }>
+  verifyOtp: (
+    email: string,
+    token: string,
+  ) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
 }
 
@@ -40,14 +44,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       loading,
-      sendMagicLink: async (email) => {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: window.location.origin },
-        })
+      sendOtp: async (email) => {
+        const { error } = await supabase.auth.signInWithOtp({ email })
         if (!error) {
-          void logMagicLinkToConsole(email)
+          void logOtpToConsole(email)
         }
+        return { error }
+      },
+      verifyOtp: async (email, token) => {
+        const { error } = await supabase.auth.verifyOtp({
+          email,
+          token,
+          type: 'email',
+        })
         return { error }
       },
       signOut: async () => {

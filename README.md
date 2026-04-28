@@ -17,9 +17,12 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 | Frontend | Vite + React + TypeScript                             |
 | Styling  | Tailwind CSS v4 + shadcn/ui (Nova preset — Geist + Lucide) |
 | Routing  | React Router                                          |
+| Server   | Node + Express (serves the Vite build and `/api/*` routes) |
 | Backend  | Supabase (Postgres + Auth + Edge Functions)           |
-| Auth     | Google OAuth via Supabase Auth                        |
+| Auth     | Email OTP (6-digit code) via Supabase Auth            |
 | AI       | Gemini, called server-side via Supabase Edge Function (Assist mode only for MVP) |
+| Email    | Resend, called from the Express server (`/api/send-email`) |
+| Hosting  | Render (Web Service, Node runtime)                    |
 
 ---
 
@@ -29,8 +32,11 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 - **npm** ≥ 10
 - **Docker Desktop** — required for the local Supabase stack
 - **Supabase CLI** — `brew install supabase/tap/supabase`
-- A Google Cloud OAuth client (client ID + secret) for the auth flow
 - A Gemini API key for the Assist agent (optional until Assist mode is wired)
+
+> Auth in dev: email OTP only — sign-in emails land in the local Mailpit
+> mailbox at <http://127.0.0.1:54424>. The 6-digit code is also logged to the
+> browser devtools console for convenience.
 
 ---
 
@@ -45,17 +51,19 @@ cd Orbit
 npm install
 
 # 3. Create env file
-cp .env.local.example .env.local
-# then edit .env.local — see "Environment variables" below
+cp .env.example .env
+# then edit .env — see "Environment variables" below
 
 # 4. Boot the local Supabase stack (applies migrations automatically)
 supabase start
 
-# 5. Run the app
-npm run dev
+# 5. Run the app (two processes — Vite + Express)
+npm run dev          # Vite on :5173
+npm run dev:server   # Express on :3000 (handles /api/*)
 ```
 
 App: <http://localhost:5173>
+API: <http://localhost:3000> (proxied from Vite at `/api`)
 Studio: <http://127.0.0.1:54423>
 
 ### Stopping
@@ -68,31 +76,23 @@ supabase stop          # tears down the local Postgres + Auth containers
 
 ## Environment variables
 
-Defined in `.env.local` (git-ignored). Template lives in `.env.local.example`.
+Defined in `.env` (git-ignored). Template lives in `.env.example`.
 
 | Variable                              | Used by              | Notes                                                                |
 | ------------------------------------- | -------------------- | -------------------------------------------------------------------- |
-| `VITE_SUPABASE_URL`                   | Browser              | Local default: `http://127.0.0.1:54421`                              |
-| `VITE_SUPABASE_ANON_KEY`              | Browser              | Printed by `supabase status -o env` after `supabase start`           |
-| `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` | Local Supabase  | Read by the Auth container at start time                             |
-| `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET`    | Local Supabase  | Read by the Auth container at start time                             |
+| `VITE_SUPABASE_URL`                   | Browser              | Local default: `http://127.0.0.1:54421`. Inlined at build time.      |
+| `VITE_SUPABASE_ANON_KEY`              | Browser              | Printed by `supabase status -o env` after `supabase start`. Inlined at build time. |
 | `GEMINI_API_KEY`                      | Edge Function (TBD)  | Stays server-side; never exposed to the browser                      |
+| `PORT`                                | Express server       | Local dev default `3000`. Render injects this in production.         |
+| `RESEND_API_KEY`                      | Express server       | Used by `/api/send-email`. Server-side only.                         |
+| `RESEND_FROM`                         | Express server       | Verified Resend sender, e.g. `Orbit <noreply@yourdomain.com>`        |
 
-After changing any `SUPABASE_AUTH_*` value you must restart the stack:
+### Signing in (dev)
 
-```bash
-supabase stop && supabase start
-```
-
-### Setting up Google OAuth
-
-1. Go to <https://console.cloud.google.com/apis/credentials>.
-2. Create an **OAuth 2.0 Client ID** of type **Web application**.
-3. Add authorized redirect URI: `http://127.0.0.1:54421/auth/v1/callback`
-4. Copy the client ID + secret into `.env.local`.
-5. `supabase stop && supabase start`.
-
-When you migrate to a hosted Supabase project, configure Google in the Supabase dashboard and add the production redirect URI in Google Cloud.
+1. Enter your email on the login page and click **Send code**.
+2. Grab the 6-digit code from the browser devtools console, or read it from
+   the latest message in Mailpit at <http://127.0.0.1:54424>.
+3. Paste the code into the form and click **Verify code**.
 
 ---
 
@@ -105,7 +105,7 @@ To avoid conflicts with other Supabase projects, ports are remapped from the def
 | API         | 54321   | 54421  |
 | DB          | 54322   | 54422  |
 | Studio      | 54323   | 54423  |
-| Inbucket    | 54324   | 54424  |
+| Mailpit    | 54324   | 54424  |
 | Pooler      | 54329   | 54429  |
 | Analytics   | 54327   | 54427  |
 | Shadow DB   | 54320   | 54420  |
@@ -130,9 +130,15 @@ src/
   types/
     database.ts      # generated by `supabase gen types`
     orbit.ts         # ergonomic aliases (Ticket, Person, AgentRun, …)
+server/
+  index.ts           # Express app — serves dist/ and mounts /api/*
+  routes/
+    send-email.ts    # POST /api/send-email — Resend
+  tsconfig.json      # builds to dist-server/ for `npm start`
 supabase/
   config.toml        # local stack config (ports, auth providers)
   migrations/        # SQL migrations applied on `supabase start`
+render.yaml          # Render Blueprint — Web Service config
 ```
 
 ---
@@ -177,9 +183,33 @@ npx tsc -b
 ### Build for production
 
 ```bash
-npm run build
-npm run preview
+npm run build         # Vite build (dist/) + tsc on server/ (dist-server/)
+npm start             # node dist-server/index.js — serves dist/ and /api/*
 ```
+
+---
+
+## Deploying to Render
+
+Orbit deploys as a single **Web Service** on Render — Express serves both the
+React build and `/api/*` routes, so there's one URL and one process.
+
+1. Push to GitHub and create a new Web Service from the repo. Render reads
+   [`render.yaml`](./render.yaml) and configures itself.
+2. In the Render dashboard → **Environment**, set:
+   - `VITE_SUPABASE_URL` (hosted Supabase project URL)
+   - `VITE_SUPABASE_ANON_KEY` (hosted anon key)
+   - `RESEND_API_KEY`
+   - `RESEND_FROM` (e.g. `Orbit <noreply@yourdomain.com>`)
+
+   `VITE_*` vars are inlined at build time, so changing them requires a redeploy.
+3. Health check is wired to `/healthz`. Build runs `npm ci && npm run build`;
+   start runs `npm start`.
+4. **Supabase migration** (one-time): `supabase link --project-ref <ref>` then
+   `supabase db push`. Add the Render URL to **Auth → URL Configuration** in
+   the Supabase dashboard so OTP redirects accept it.
+5. **Resend**: verify your sending domain in the Resend dashboard before
+   production traffic.
 
 ---
 

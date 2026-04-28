@@ -11,4 +11,16 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3000',
+      // Proxy to local Supabase Mailpit so the dev OTP helper can read
+      // sign-in emails without tripping CORS.
+      '/__mailpit': {
+        target: 'http://127.0.0.1:54424',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/__mailpit/, ''),
+      },
+    },
+  },
 })

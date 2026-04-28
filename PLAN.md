@@ -15,9 +15,12 @@ Tagline: Keep every open loop in motion.
 - Vite + React + TypeScript (SPA)
 - Tailwind CSS v4 + shadcn/ui (Nova preset — Geist + Lucide)
 - React Router
+- Node + Express server (serves the Vite build and `/api/*` routes)
 - Supabase (local CLI for dev, hosted later) — ports remapped to 544xx (see supabase/config.toml)
-- Auth: Google (via Supabase Auth)
+- Auth: Email OTP (6-digit code, via Supabase Auth)
 - AI: Gemini (Assist mode only for MVP, called server-side via Edge Function)
+- Email: Resend, called from the Express server (`/api/send-email`)
+- Hosting: Render (Web Service, Node runtime)
 
 ---
 
