@@ -1,73 +1,195 @@
-# React + TypeScript + Vite
+# Orbit
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A personal ticketing system for managing open loops — tasks, follow-ups, decisions, research, admin work, and relationships.
 
-Currently, two official plugins are available:
+Every commitment becomes a ticket with a state, next action, history, and optional AI agent support.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+> **Tagline:** Keep every open loop in motion.
 
-## React Compiler
+See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+| Layer    | Choice                                                |
+| -------- | ----------------------------------------------------- |
+| Frontend | Vite + React + TypeScript                             |
+| Styling  | Tailwind CSS v4 + shadcn/ui (Nova preset — Geist + Lucide) |
+| Routing  | React Router                                          |
+| Backend  | Supabase (Postgres + Auth + Edge Functions)           |
+| Auth     | Google OAuth via Supabase Auth                        |
+| AI       | Gemini, called server-side via Supabase Edge Function (Assist mode only for MVP) |
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Prerequisites
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **Node.js** ≥ 20 (project tested on 25)
+- **npm** ≥ 10
+- **Docker Desktop** — required for the local Supabase stack
+- **Supabase CLI** — `brew install supabase/tap/supabase`
+- A Google Cloud OAuth client (client ID + secret) for the auth flow
+- A Gemini API key for the Assist agent (optional until Assist mode is wired)
+
+---
+
+## Quick start
+
+```bash
+# 1. Clone
+git clone https://github.com/JustinLeung/Orbit.git
+cd Orbit
+
+# 2. Install JS deps
+npm install
+
+# 3. Create env file
+cp .env.local.example .env.local
+# then edit .env.local — see "Environment variables" below
+
+# 4. Boot the local Supabase stack (applies migrations automatically)
+supabase start
+
+# 5. Run the app
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+App: <http://localhost:5173>
+Studio: <http://127.0.0.1:54423>
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Stopping
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+supabase stop          # tears down the local Postgres + Auth containers
 ```
+
+---
+
+## Environment variables
+
+Defined in `.env.local` (git-ignored). Template lives in `.env.local.example`.
+
+| Variable                              | Used by              | Notes                                                                |
+| ------------------------------------- | -------------------- | -------------------------------------------------------------------- |
+| `VITE_SUPABASE_URL`                   | Browser              | Local default: `http://127.0.0.1:54421`                              |
+| `VITE_SUPABASE_ANON_KEY`              | Browser              | Printed by `supabase status -o env` after `supabase start`           |
+| `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` | Local Supabase  | Read by the Auth container at start time                             |
+| `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET`    | Local Supabase  | Read by the Auth container at start time                             |
+| `GEMINI_API_KEY`                      | Edge Function (TBD)  | Stays server-side; never exposed to the browser                      |
+
+After changing any `SUPABASE_AUTH_*` value you must restart the stack:
+
+```bash
+supabase stop && supabase start
+```
+
+### Setting up Google OAuth
+
+1. Go to <https://console.cloud.google.com/apis/credentials>.
+2. Create an **OAuth 2.0 Client ID** of type **Web application**.
+3. Add authorized redirect URI: `http://127.0.0.1:54421/auth/v1/callback`
+4. Copy the client ID + secret into `.env.local`.
+5. `supabase stop && supabase start`.
+
+When you migrate to a hosted Supabase project, configure Google in the Supabase dashboard and add the production redirect URI in Google Cloud.
+
+---
+
+## Local Supabase ports
+
+To avoid conflicts with other Supabase projects, ports are remapped from the defaults:
+
+| Service     | Default | Orbit  |
+| ----------- | ------- | ------ |
+| API         | 54321   | 54421  |
+| DB          | 54322   | 54422  |
+| Studio      | 54323   | 54423  |
+| Inbucket    | 54324   | 54424  |
+| Pooler      | 54329   | 54429  |
+| Analytics   | 54327   | 54427  |
+| Shadow DB   | 54320   | 54420  |
+
+Port assignments live in `supabase/config.toml`.
+
+---
+
+## Project layout
+
+```
+src/
+  components/
+    auth/            # RequireAuth route guard
+    layout/          # AppLayout (sidebar) + PageHeader
+    ui/              # shadcn/ui primitives (button, ...)
+  lib/
+    auth.tsx         # AuthProvider + useAuth hook
+    supabase.ts      # typed Supabase client
+    utils.ts         # cn() + small helpers
+  pages/             # one file per view: Inbox, Now, Waiting, Follow-Up, Review, Stuck, People, Login
+  types/
+    database.ts      # generated by `supabase gen types`
+    orbit.ts         # ergonomic aliases (Ticket, Person, AgentRun, …)
+supabase/
+  config.toml        # local stack config (ports, auth providers)
+  migrations/        # SQL migrations applied on `supabase start`
+```
+
+---
+
+## Data model summary
+
+Six tables, all scoped by `user_id` with RLS so the same schema works single- or multi-user:
+
+- `tickets` — the core entity
+- `people` — anyone tied to a ticket
+- `ticket_participants` — many-to-many between tickets and people
+- `ticket_relations` — `relates_to` and `blocked_by` links between tickets
+- `ticket_events` — append-only history (status changes, notes, agent runs, …)
+- `agent_runs` — Assist-mode outputs awaiting your review
+
+Full schema: [`supabase/migrations/`](./supabase/migrations).
+
+---
+
+## Common workflows
+
+### Regenerate TypeScript types after a schema change
+
+```bash
+supabase gen types typescript --local > src/types/database.ts
+```
+
+### Create a new migration
+
+```bash
+supabase migration new <name>          # writes a timestamped SQL file
+# edit it, then:
+supabase db reset                      # rebuilds the local DB from migrations
+```
+
+### Type-check the frontend
+
+```bash
+npx tsc -b
+```
+
+### Build for production
+
+```bash
+npm run build
+npm run preview
+```
+
+---
+
+## Roadmap (post-scaffold)
+
+- Ticket creation form + Inbox list
+- Ticket detail view with history (`ticket_events`)
+- Status transitions + computed views (Now, Waiting, Stuck)
+- People CRUD + per-person ticket list
+- Edge Function: Assist mode → Gemini, writing into `agent_runs`
+- Review queue UI for agent output
+
+See [`PLAN.md`](./PLAN.md) for what's *intentionally* out of scope for MVP.
