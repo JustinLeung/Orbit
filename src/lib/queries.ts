@@ -1,41 +1,72 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { Person, Ticket, TicketStatus } from '@/types/orbit'
+import type {
+  Person,
+  Ticket,
+  TicketInsert,
+  TicketStatus,
+} from '@/types/orbit'
 
-type State<T> = { data: T; loading: boolean; error: Error | null }
+type State<T> = {
+  data: T
+  loading: boolean
+  error: Error | null
+  refresh: () => void
+}
 
-function useAsync<T>(
+const TICKETS_CHANGED_EVENT = 'orbit:tickets-changed'
+
+function notifyTicketsChanged() {
+  window.dispatchEvent(new CustomEvent(TICKETS_CHANGED_EVENT))
+}
+
+function useTicketAsync<T>(
   fetcher: () => Promise<T>,
   deps: ReadonlyArray<unknown>,
   initial: T,
+  { listen }: { listen: boolean } = { listen: false },
 ): State<T> {
-  const [state, setState] = useState<State<T>>({
-    data: initial,
-    loading: true,
-    error: null,
-  })
+  const [data, setData] = useState<T>(initial)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    setState((s) => ({ ...s, loading: true, error: null }))
+    setLoading(true)
+    setError(null)
     fetcher()
-      .then((data) => {
-        if (!cancelled) setState({ data, loading: false, error: null })
+      .then((next) => {
+        if (!cancelled) {
+          setData(next)
+          setLoading(false)
+        }
       })
-      .catch((error: Error) => {
-        if (!cancelled) setState((s) => ({ ...s, loading: false, error }))
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setError(err)
+          setLoading(false)
+        }
       })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
+  }, [...deps, version])
 
-  return state
+  const refresh = useCallback(() => setVersion((v) => v + 1), [])
+
+  useEffect(() => {
+    if (!listen) return
+    window.addEventListener(TICKETS_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(TICKETS_CHANGED_EVENT, refresh)
+  }, [listen, refresh])
+
+  return { data, loading, error, refresh }
 }
 
 export function useTicketsByStatus(status: TicketStatus) {
-  return useAsync<Ticket[]>(
+  return useTicketAsync<Ticket[]>(
     async () => {
       const { data, error } = await supabase
         .from('tickets')
@@ -47,12 +78,13 @@ export function useTicketsByStatus(status: TicketStatus) {
     },
     [status],
     [],
+    { listen: true },
   )
 }
 
 // "Now": active tickets with a next_action_at on or before today.
 export function useNowTickets() {
-  return useAsync<Ticket[]>(
+  return useTicketAsync<Ticket[]>(
     async () => {
       const todayEnd = new Date()
       todayEnd.setHours(23, 59, 59, 999)
@@ -67,6 +99,7 @@ export function useNowTickets() {
     },
     [],
     [],
+    { listen: true },
   )
 }
 
@@ -75,7 +108,7 @@ export function useNowTickets() {
 //   - waiting with overdue next_action_at
 //   - review and not updated in 3+ days
 export function useStuckTickets() {
-  return useAsync<Ticket[]>(
+  return useTicketAsync<Ticket[]>(
     async () => {
       const now = new Date()
       const threeDaysAgo = new Date(now)
@@ -104,11 +137,12 @@ export function useStuckTickets() {
     },
     [],
     [],
+    { listen: true },
   )
 }
 
 export function usePeople() {
-  return useAsync<Person[]>(
+  return useTicketAsync<Person[]>(
     async () => {
       const { data, error } = await supabase
         .from('people')
@@ -122,3 +156,34 @@ export function usePeople() {
   )
 }
 
+// createTicket inserts the ticket and a `ticket_created` event in sequence.
+// We don't wrap in a transaction because Supabase's REST API doesn't expose
+// one — the event insert failing is non-fatal for the ticket but logged.
+export async function createTicket(
+  input: Omit<TicketInsert, 'user_id'>,
+): Promise<Ticket> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { data: ticket, error } = await supabase
+    .from('tickets')
+    .insert({ ...input, user_id: userId })
+    .select()
+    .single()
+  if (error) throw error
+
+  const { error: eventErr } = await supabase.from('ticket_events').insert({
+    user_id: userId,
+    ticket_id: ticket.id,
+    event_type: 'ticket_created',
+    payload: { source: 'ui' },
+  })
+  if (eventErr) {
+    console.error('ticket_created event insert failed', eventErr)
+  }
+
+  notifyTicketsChanged()
+  return ticket
+}
