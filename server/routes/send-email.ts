@@ -1,36 +1,27 @@
 import { Router } from 'express'
-import { Resend } from 'resend'
+import { sendEmail } from '../lib/resend.js'
 
 const router = Router()
 
-let resend: Resend | null = null
-function getResend(): Resend | null {
-  if (!process.env.RESEND_API_KEY) return null
-  if (!resend) resend = new Resend(process.env.RESEND_API_KEY)
-  return resend
-}
-
 router.post('/', async (req, res) => {
-  const client = getResend()
-  if (!client) {
-    return res.status(503).json({ error: 'RESEND_API_KEY is not configured' })
-  }
-
   const { to, subject, html } = req.body ?? {}
   if (!to || !subject || !html) {
     return res.status(400).json({ error: 'to, subject, and html are required' })
   }
 
-  const { data, error } = await client.emails.send({
-    from: process.env.RESEND_FROM ?? 'Orbit <noreply@example.com>',
-    to,
-    subject,
-    html,
-  })
-
-  if (error) {
-    return res.status(500).json({ error })
+  const result = await sendEmail({ to, subject, html })
+  if ('error' in result && result.error) {
+    const message =
+      typeof result.error === 'object' && 'message' in result.error
+        ? (result.error as { message: string }).message
+        : 'Email send failed'
+    if (message.includes('RESEND_API_KEY')) {
+      return res.status(503).json({ error: message })
+    }
+    return res.status(500).json({ error: result.error })
   }
+
+  const data = 'data' in result ? result.data : undefined
   res.json({ id: data?.id })
 })
 

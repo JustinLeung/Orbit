@@ -2,6 +2,7 @@ import express from 'express'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sendEmailRoute from './routes/send-email.js'
+import sendOtpRoute from './routes/send-otp.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -13,6 +14,7 @@ app.get('/healthz', (_req, res) => {
 })
 
 app.use('/api/send-email', sendEmailRoute)
+app.use('/api/auth/send-otp', sendOtpRoute)
 
 const distPath = path.resolve(__dirname, '../dist')
 app.use(express.static(distPath))
