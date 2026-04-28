@@ -1,15 +1,21 @@
 import { PageHeader } from '@/components/layout/PageHeader'
+import { TicketList } from '@/components/tickets/TicketList'
+import { useNowTickets } from '@/lib/queries'
 
 export function NowPage() {
+  const { data, loading, error } = useNowTickets()
   return (
     <>
       <PageHeader
         title="Now"
         description="Tickets requiring action today."
       />
-      <div className="px-8 py-6 text-sm text-muted-foreground">
-        Nothing is on your plate right now.
-      </div>
+      <TicketList
+        tickets={data}
+        loading={loading}
+        error={error}
+        empty="Nothing is on your plate right now."
+      />
     </>
   )
 }

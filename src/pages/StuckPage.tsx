@@ -1,15 +1,21 @@
 import { PageHeader } from '@/components/layout/PageHeader'
+import { TicketList } from '@/components/tickets/TicketList'
+import { useStuckTickets } from '@/lib/queries'
 
 export function StuckPage() {
+  const { data, loading, error } = useStuckTickets()
   return (
     <>
       <PageHeader
         title="Stuck"
         description="Tickets without a clear next action."
       />
-      <div className="px-8 py-6 text-sm text-muted-foreground">
-        Nothing is stuck.
-      </div>
+      <TicketList
+        tickets={data}
+        loading={loading}
+        error={error}
+        empty="Nothing is stuck."
+      />
     </>
   )
 }

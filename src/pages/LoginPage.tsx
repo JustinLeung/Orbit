@@ -11,9 +11,9 @@ type Status =
   | { kind: 'verifying' }
   | { kind: 'error'; message: string }
 
-// In dev, sign in via the local Mailpit OTP loop. In prod, hand off to
-// Google — Supabase doesn't have a real SMTP sender configured.
-const USE_GOOGLE = !import.meta.env.DEV
+// Both providers are offered in prod; dev hides the Google button because
+// the local Supabase stack has no OAuth credentials wired up.
+const SHOW_GOOGLE = !import.meta.env.DEV
 
 export function LoginPage() {
   const { session, loading, sendOtp, verifyOtp, signInWithGoogle } = useAuth()
@@ -67,19 +67,27 @@ export function LoginPage() {
           Keep every open loop in motion.
         </p>
 
-        {USE_GOOGLE ? (
+        {SHOW_GOOGLE ? (
           <div className="mt-6 space-y-3">
             <Button
               type="button"
+              variant="outline"
               className="w-full"
               onClick={onGoogle}
               disabled={status.kind === 'sending'}
             >
               {status.kind === 'sending' ? 'Redirecting…' : 'Continue with Google'}
             </Button>
+            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              or
+              <span className="h-px flex-1 bg-border" />
+            </div>
           </div>
-        ) : !awaitingCode ? (
-          <form onSubmit={onSendOtp} className="mt-6 space-y-3">
+        ) : null}
+
+        {!awaitingCode ? (
+          <form onSubmit={onSendOtp} className="mt-3 space-y-3">
             <Input
               type="email"
               required
@@ -94,11 +102,11 @@ export function LoginPage() {
               className="w-full"
               disabled={!email || status.kind === 'sending'}
             >
-              {status.kind === 'sending' ? 'Sending…' : 'Send code'}
+              {status.kind === 'sending' ? 'Sending…' : 'Email me a code'}
             </Button>
           </form>
         ) : (
-          <form onSubmit={onVerifyOtp} className="mt-6 space-y-3">
+          <form onSubmit={onVerifyOtp} className="mt-3 space-y-3">
             <p className="text-sm text-muted-foreground">
               We sent a 6-digit code to <span className="font-medium">{email}</span>.
             </p>
@@ -134,7 +142,7 @@ export function LoginPage() {
           </form>
         )}
 
-        {!USE_GOOGLE && status.kind === 'awaiting-code' ? (
+        {import.meta.env.DEV && status.kind === 'awaiting-code' ? (
           <p className="mt-4 text-xs text-muted-foreground">
             Check your devtools console for the code, or open Mailpit at{' '}
             <a
