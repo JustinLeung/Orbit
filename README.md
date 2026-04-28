@@ -250,11 +250,12 @@ keeps using `npm run seed` with its own custom data.
 
 ## Roadmap (post-scaffold)
 
-- Ticket creation form + Inbox list
-- Ticket detail view with history (`ticket_events`)
-- Status transitions + computed views (Now, Waiting, Stuck)
-- People CRUD + per-person ticket list
-- Edge Function: Assist mode → Gemini, writing into `agent_runs`
-- Review queue UI for agent output
+- [x] Ticket creation form (quick-add on Inbox + full editor reachable from
+  the sidebar or the `n` shortcut) — see ORB-6
+- [ ] Ticket detail view with history (`ticket_events`)
+- [ ] Status transitions + computed views (Now, Waiting, Stuck)
+- [ ] People CRUD + per-person ticket list
+- [ ] Edge Function: Assist mode → Gemini, writing into `agent_runs`
+- [ ] Review queue UI for agent output
 
 See [`PLAN.md`](./PLAN.md) for what's *intentionally* out of scope for MVP.

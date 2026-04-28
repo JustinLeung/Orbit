@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/layout/PageHeader'
 import { TicketList } from '@/components/tickets/TicketList'
+import { QuickAddInput } from '@/components/tickets/QuickAddInput'
 import { useTicketsByStatus } from '@/lib/queries'
 
 export function InboxPage() {
@@ -10,6 +11,7 @@ export function InboxPage() {
         title="Inbox"
         description="Captured but not yet clarified."
       />
+      <QuickAddInput />
       <TicketList
         tickets={data}
         loading={loading}

@@ -124,7 +124,7 @@ export function TicketDetailDialog({
 
                   <div className="grid grid-cols-3 gap-4">
                     {ticket.urgency != null ? (
-                      <Field label="Urgency">{ticket.urgency}/4</Field>
+                      <Field label="Urgency">{ticket.urgency}/5</Field>
                     ) : null}
                     {ticket.importance != null ? (
                       <Field label="Importance">{ticket.importance}/5</Field>
