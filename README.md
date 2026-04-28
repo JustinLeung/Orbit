@@ -281,7 +281,9 @@ keeps using `npm run seed` with its own custom data.
 
 - [x] Ticket creation form (quick-add on Inbox + full editor reachable from
   the sidebar or the `n` shortcut) — see ORB-6
-- [ ] Ticket detail view with history (`ticket_events`)
+- [x] Inline-edit ticket detail dialog (click-to-edit per field, optimistic
+  save, audit via `field_updated` event) — see ORB-7
+- [ ] Ticket detail view with history (`ticket_events` rendered in the dialog)
 - [ ] Status transitions + computed views (Now, Waiting, Stuck)
 - [ ] People CRUD + per-person ticket list
 - [ ] Edge Function: Assist mode → Gemini, writing into `agent_runs`
