@@ -19,6 +19,7 @@ type AuthContextValue = {
     email: string,
     token: string,
   ) => Promise<{ error: Error | null }>
+  signInWithGoogle: () => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
 }
 
@@ -45,7 +46,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       loading,
       sendOtp: async (email) => {
-        const { error } = await supabase.auth.signInWithOtp({ email })
+        // Without this, the magic link in the email falls back to the
+        // Supabase project's site_url, which is pinned to localhost.
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: window.location.origin },
+        })
         if (!error) {
           void logOtpToConsole(email)
         }
@@ -56,6 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email,
           token,
           type: 'email',
+        })
+        return { error }
+      },
+      signInWithGoogle: async () => {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: window.location.origin },
         })
         return { error }
       },

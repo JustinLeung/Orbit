@@ -19,7 +19,7 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 | Routing  | React Router                                          |
 | Server   | Node + Express (serves the Vite build and `/api/*` routes) |
 | Backend  | Supabase (Postgres + Auth + Edge Functions)           |
-| Auth     | Email OTP (6-digit code) via Supabase Auth            |
+| Auth     | Google OAuth in prod, email OTP (6-digit code) in dev — both via Supabase Auth |
 | AI       | Gemini, called server-side via Supabase Edge Function (Assist mode only for MVP) |
 | Email    | Resend, called from the Express server (`/api/send-email`) |
 | Hosting  | Render (Web Service, Node runtime)                    |
@@ -36,7 +36,9 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 
 > Auth in dev: email OTP only — sign-in emails land in the local Mailpit
 > mailbox at <http://127.0.0.1:54424>. The 6-digit code is also logged to the
-> browser devtools console for convenience.
+> browser devtools console for convenience. Production builds show a
+> "Continue with Google" button instead, since the hosted Supabase project
+> has no SMTP sender wired up.
 
 ---
 
@@ -82,6 +84,7 @@ Defined in `.env` (git-ignored). Template lives in `.env.example`.
 | ------------------------------------- | -------------------- | -------------------------------------------------------------------- |
 | `VITE_SUPABASE_URL`                   | Browser              | Local default: `http://127.0.0.1:54421`. Inlined at build time.      |
 | `VITE_SUPABASE_ANON_KEY`              | Browser              | Printed by `supabase status -o env` after `supabase start`. Inlined at build time. |
+| `SUPABASE_SERVICE_ROLE_KEY`           | Seed script          | Bypasses RLS — only used by `npm run seed` locally. Never expose to the browser.   |
 | `GEMINI_API_KEY`                      | Edge Function (TBD)  | Stays server-side; never exposed to the browser                      |
 | `PORT`                                | Express server       | Local dev default `3000`. Render injects this in production.         |
 | `RESEND_API_KEY`                      | Express server       | Used by `/api/send-email`. Server-side only.                         |
@@ -135,6 +138,8 @@ server/
   routes/
     send-email.ts    # POST /api/send-email — Resend
   tsconfig.json      # builds to dist-server/ for `npm start`
+scripts/
+  seed.ts            # `npm run seed` — populates the local DB with sample tickets
 supabase/
   config.toml        # local stack config (ports, auth providers)
   migrations/        # SQL migrations applied on `supabase start`
@@ -174,6 +179,20 @@ supabase migration new <name>          # writes a timestamped SQL file
 supabase db reset                      # rebuilds the local DB from migrations
 ```
 
+### Seed the local DB with sample tickets
+
+```bash
+# Sign in once at http://localhost:5173/login so a Supabase user exists,
+# then put SERVICE_ROLE_KEY (from `supabase status -o env`) into .env as
+# SUPABASE_SERVICE_ROLE_KEY, and run:
+npm run seed                          # seeds for justin@justinleung.net by default
+npm run seed -- alice@example.com     # seeds for a different user
+```
+
+Wipes existing tickets + people for the target user, then inserts a spread
+across every status (inbox, active, waiting, follow_up, review, closed,
+dropped) plus a few people, participants, and history events.
+
 ### Type-check the frontend
 
 ```bash
@@ -207,8 +226,12 @@ React build and `/api/*` routes, so there's one URL and one process.
    start runs `npm start`.
 4. **Supabase migration** (one-time): `supabase link --project-ref <ref>` then
    `supabase db push`. Add the Render URL to **Auth → URL Configuration** in
-   the Supabase dashboard so OTP redirects accept it.
-5. **Resend**: verify your sending domain in the Resend dashboard before
+   the Supabase dashboard so the Google OAuth redirect is accepted.
+5. **Google OAuth** (one-time): in the Supabase dashboard enable the Google
+   provider with a client ID/secret from Google Cloud, and add the Render URL
+   to the OAuth client's "Authorized redirect URIs" alongside
+   `https://<your-supabase-ref>.supabase.co/auth/v1/callback`.
+6. **Resend**: verify your sending domain in the Resend dashboard before
    production traffic.
 
 ---

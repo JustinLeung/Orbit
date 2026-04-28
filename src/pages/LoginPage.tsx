@@ -11,14 +11,24 @@ type Status =
   | { kind: 'verifying' }
   | { kind: 'error'; message: string }
 
+// In dev, sign in via the local Mailpit OTP loop. In prod, hand off to
+// Google — Supabase doesn't have a real SMTP sender configured.
+const USE_GOOGLE = !import.meta.env.DEV
+
 export function LoginPage() {
-  const { session, loading, sendOtp, verifyOtp } = useAuth()
+  const { session, loading, sendOtp, verifyOtp, signInWithGoogle } = useAuth()
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
   if (loading) return null
   if (session) return <Navigate to="/now" replace />
+
+  async function onGoogle() {
+    setStatus({ kind: 'sending' })
+    const { error } = await signInWithGoogle()
+    if (error) setStatus({ kind: 'error', message: error.message })
+  }
 
   async function onSendOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -57,7 +67,18 @@ export function LoginPage() {
           Keep every open loop in motion.
         </p>
 
-        {!awaitingCode ? (
+        {USE_GOOGLE ? (
+          <div className="mt-6 space-y-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={onGoogle}
+              disabled={status.kind === 'sending'}
+            >
+              {status.kind === 'sending' ? 'Redirecting…' : 'Continue with Google'}
+            </Button>
+          </div>
+        ) : !awaitingCode ? (
           <form onSubmit={onSendOtp} className="mt-6 space-y-3">
             <Input
               type="email"
@@ -113,7 +134,7 @@ export function LoginPage() {
           </form>
         )}
 
-        {status.kind === 'awaiting-code' ? (
+        {!USE_GOOGLE && status.kind === 'awaiting-code' ? (
           <p className="mt-4 text-xs text-muted-foreground">
             Check your devtools console for the code, or open Mailpit at{' '}
             <a
