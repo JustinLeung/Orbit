@@ -10,7 +10,10 @@
     "start": "node dist-server/index.js",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed": "tsx --env-file=.env scripts/seed.ts"
+    "seed": "tsx --env-file=.env scripts/seed.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "engines": {
     "node": ">=20"
@@ -34,19 +37,27 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/ui": "^4.1.5",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "jsdom": "^29.1.0",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.19.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }

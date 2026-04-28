@@ -23,6 +23,7 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 | AI       | Gemini, called server-side via Supabase Edge Function (Assist mode only for MVP) |
 | Email    | Resend, called from the Express server (`/api/send-email`, `/api/auth/send-otp`) |
 | Hosting  | Render (Web Service, Node runtime)                    |
+| Testing  | Vitest + React Testing Library (jsdom) + supertest    |
 
 ---
 
@@ -206,6 +207,25 @@ dropped) plus a few people, participants, and history events.
 ```bash
 npx tsc -b
 ```
+
+### Run tests
+
+```bash
+npm test                              # one-shot run (CI-friendly)
+npm run test:watch                    # watch mode
+npm run test:ui                       # Vitest UI in the browser
+```
+
+Tests live next to the code as `*.test.ts` / `*.test.tsx` and use **Vitest**
++ **React Testing Library** (jsdom). Server routes use **supertest**. Smoke
+coverage today: `cn()` (`src/lib/utils.test.ts`), `App` route guards
+(`src/App.test.tsx`), `/api/send-email` error paths
+(`server/routes/send-email.test.ts`), and `/api/auth/send-otp` happy +
+fallback paths (`server/routes/send-otp.test.ts`).
+
+GitHub Actions runs `npm run lint`, `tsc -b`, and `npm test` on every push to
+`main` and every pull request — see
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 ### Build for production
 
