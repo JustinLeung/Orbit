@@ -304,7 +304,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      seed_onboarding_tickets: {
+        Args: Record<string, never>
+        Returns: number
+      }
     }
     Enums: {
       agent_mode: "none" | "assist" | "semi_auto" | "auto"

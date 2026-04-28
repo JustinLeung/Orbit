@@ -236,6 +236,18 @@ React build and `/api/*` routes, so there's one URL and one process.
 
 ---
 
+## Onboarding seed (production)
+
+When a user signs in for the first time on the prod build, the client calls
+the `seed_onboarding_tickets()` Postgres RPC, which inserts ~6 helper
+tickets that demonstrate Orbit's core concepts (Inbox / Now / Waiting /
+Follow-up plus Decision and Research types). The function is `security
+definer`, derives the user from `auth.uid()`, and no-ops if the user
+already has any tickets, so re-firing on subsequent sign-ins is safe.
+
+The call is gated on `import.meta.env.PROD` in `src/lib/auth.tsx`, so dev
+keeps using `npm run seed` with its own custom data.
+
 ## Roadmap (post-scaffold)
 
 - Ticket creation form + Inbox list
