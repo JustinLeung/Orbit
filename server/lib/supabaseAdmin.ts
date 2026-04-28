@@ -13,3 +13,7 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   }
   return cached
 }
+
+export function __resetSupabaseAdminForTests() {
+  cached = null
+}

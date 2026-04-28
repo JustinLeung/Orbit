@@ -26,3 +26,8 @@ export async function sendEmail(args: SendEmailArgs) {
   }
   return client.emails.send({ from: getFromAddress(), ...args })
 }
+
+// Tests flip env vars between cases and need a fresh client per case.
+export function __resetResendForTests() {
+  cached = null
+}
