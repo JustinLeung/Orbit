@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
 import type { Ticket, TicketType } from '@/types/orbit'
 
 const TYPE_LABEL: Record<TicketType, string> = {
@@ -47,6 +49,7 @@ export function TicketList({
   error: Error | null
   empty: string
 }) {
+  const [selected, setSelected] = useState<Ticket | null>(null)
   if (loading) {
     return (
       <div className="px-8 py-6 text-sm text-muted-foreground">Loading…</div>
@@ -65,47 +68,59 @@ export function TicketList({
     )
   }
   return (
-    <ul className="divide-y">
-      {tickets.map((t) => {
-        const next = formatNextAction(t.next_action_at)
-        return (
-          <li
-            key={t.id}
-            className="flex items-start gap-4 px-8 py-4 hover:bg-muted/40"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {TYPE_LABEL[t.type]}
-                </span>
-                <h3 className="truncate text-sm font-medium">{t.title}</h3>
-              </div>
-              {t.next_action ? (
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  → {t.next_action}
-                </p>
-              ) : null}
-              {t.waiting_on ? (
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  Waiting on {t.waiting_on}
-                </p>
-              ) : null}
-            </div>
-            {next ? (
-              <span
-                className={cn(
-                  'shrink-0 text-xs',
-                  next.overdue
-                    ? 'text-destructive'
-                    : 'text-muted-foreground',
-                )}
+    <>
+      <ul className="divide-y">
+        {tickets.map((t) => {
+          const next = formatNextAction(t.next_action_at)
+          return (
+            <li key={t.id}>
+              <button
+                type="button"
+                onClick={() => setSelected(t)}
+                className="flex w-full items-start gap-4 px-8 py-4 text-left hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
               >
-                {next.label}
-              </span>
-            ) : null}
-          </li>
-        )
-      })}
-    </ul>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {TYPE_LABEL[t.type]}
+                    </span>
+                    <h3 className="truncate text-sm font-medium">{t.title}</h3>
+                  </div>
+                  {t.next_action ? (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      → {t.next_action}
+                    </p>
+                  ) : null}
+                  {t.waiting_on ? (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      Waiting on {t.waiting_on}
+                    </p>
+                  ) : null}
+                </div>
+                {next ? (
+                  <span
+                    className={cn(
+                      'shrink-0 text-xs',
+                      next.overdue
+                        ? 'text-destructive'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    {next.label}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <TicketDetailDialog
+        ticket={selected}
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null)
+        }}
+      />
+    </>
   )
 }
