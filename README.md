@@ -129,9 +129,14 @@ src/
   components/
     auth/            # RequireAuth route guard
     layout/          # AppLayout (sidebar) + PageHeader
-    ui/              # shadcn/ui primitives (button, ...)
+    tickets/         # TicketList, TicketDetailDialog (inline-edit),
+                     # TicketCreateDialog, QuickAddInput, EditableField,
+                     # form-helpers
+    ui/              # shadcn/ui primitives (button, input, ...)
   lib/
     auth.tsx         # AuthProvider + useAuth hook
+    createTicket.tsx # CreateTicketProvider + global "n" shortcut
+    queries.ts       # useTickets*/usePeople hooks + createTicket/updateTicket
     supabase.ts      # typed Supabase client
     utils.ts         # cn() + small helpers
   pages/             # one file per view: Inbox, Now, Waiting, Follow-Up, Review, Stuck, People, Login
