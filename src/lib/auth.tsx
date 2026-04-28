@@ -34,8 +34,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(data.session)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next)
+      // Onboarding seed for fresh prod accounts. The RPC is idempotent
+      // (no-ops if the user already has tickets), so re-firing on every
+      // SIGNED_IN is safe. Dev uses `npm run seed` instead.
+      if (event === 'SIGNED_IN' && next && import.meta.env.PROD) {
+        void supabase.rpc('seed_onboarding_tickets').then(({ error }) => {
+          if (error) console.warn('Onboarding seed skipped:', error.message)
+        })
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [])
