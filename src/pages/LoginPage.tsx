@@ -102,13 +102,15 @@ export function LoginPage() {
               className="w-full"
               disabled={!email || status.kind === 'sending'}
             >
-              {status.kind === 'sending' ? 'Sending…' : 'Email me a code'}
+              {status.kind === 'sending' ? 'Sending…' : 'Email me a code or link'}
             </Button>
           </form>
         ) : (
           <form onSubmit={onVerifyOtp} className="mt-3 space-y-3">
             <p className="text-sm text-muted-foreground">
-              We sent a 6-digit code to <span className="font-medium">{email}</span>.
+              We sent a 6-digit code and a sign-in link to{' '}
+              <span className="font-medium">{email}</span>. Enter the code below
+              or click the link in the email.
             </p>
             <Input
               inputMode="numeric"
@@ -144,16 +146,9 @@ export function LoginPage() {
 
         {import.meta.env.DEV && status.kind === 'awaiting-code' ? (
           <p className="mt-4 text-xs text-muted-foreground">
-            Check your devtools console for the code, or open Mailpit at{' '}
-            <a
-              className="underline"
-              href="http://127.0.0.1:54424"
-              target="_blank"
-              rel="noreferrer"
-            >
-              127.0.0.1:54424
-            </a>
-            .
+            Dev: with no <code>RESEND_API_KEY</code> set, the code and link are
+            printed to the <span className="font-medium">server console</span>{' '}
+            (the <code>npm run dev:server</code> terminal).
           </p>
         ) : null}
 
