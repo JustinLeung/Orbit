@@ -8,12 +8,13 @@ import {
 } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { logMagicLinkToConsole } from '@/lib/devMagicLink'
 
 type AuthContextValue = {
   session: Session | null
   user: User | null
   loading: boolean
-  signInWithGoogle: () => Promise<void>
+  sendMagicLink: (email: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
 }
 
@@ -39,11 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       loading,
-      signInWithGoogle: async () => {
-        await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: { redirectTo: window.location.origin },
+      sendMagicLink: async (email) => {
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: window.location.origin },
         })
+        if (!error) {
+          void logMagicLinkToConsole(email)
+        }
+        return { error }
       },
       signOut: async () => {
         await supabase.auth.signOut()
