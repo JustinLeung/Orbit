@@ -19,7 +19,7 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 | Routing  | React Router                                          |
 | Server   | Node + Express (serves the Vite build and `/api/*` routes) |
 | Backend  | Supabase (Postgres + Auth + Edge Functions)           |
-| Auth     | Google OAuth + email OTP in prod, email OTP only in dev — both via Supabase Auth |
+| Auth     | Email OTP via Supabase Auth (Google OAuth temporarily disabled — see ORB-5) |
 | AI       | Gemini, called server-side via Supabase Edge Function (Assist mode only for MVP) |
 | Email    | Resend, called from the Express server (`/api/send-email`) |
 | Hosting  | Render (Web Service, Node runtime)                    |
@@ -36,9 +36,9 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 
 > Auth in dev: email OTP only — sign-in emails land in the local Mailpit
 > mailbox at <http://127.0.0.1:54424>. The 6-digit code is also logged to the
-> browser devtools console for convenience. Production builds offer both
-> "Continue with Google" and email OTP; Google requires Supabase OAuth
-> credentials and email OTP requires SMTP wired up on the hosted project.
+> browser devtools console for convenience. Production also uses email OTP
+> only for now; the Google sign-in button is hidden until ORB-5 (post-OAuth
+> redirect lands on localhost instead of orbit-app.cc) is fixed.
 
 ---
 

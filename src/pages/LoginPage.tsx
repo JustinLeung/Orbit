@@ -11,9 +11,9 @@ type Status =
   | { kind: 'verifying' }
   | { kind: 'error'; message: string }
 
-// Both providers are offered in prod; dev hides the Google button because
-// the local Supabase stack has no OAuth credentials wired up.
-const SHOW_GOOGLE = !import.meta.env.DEV
+// Google is temporarily disabled in all environments — production redirects
+// back to localhost instead of orbit-app.cc. Re-enable once ORB-5 is fixed.
+const SHOW_GOOGLE = false
 
 export function LoginPage() {
   const { session, loading, sendOtp, verifyOtp, signInWithGoogle } = useAuth()
