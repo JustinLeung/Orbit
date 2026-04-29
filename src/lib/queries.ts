@@ -586,6 +586,38 @@ export async function runAssistTurn(args: {
   }
 }
 
+// Computes the next AssistState when the user picks a different current
+// phase. Phases before the picked one become 'done', the picked one is
+// 'in_progress', later phases reset to 'not_started'. Returns null if the
+// shape is missing or the phase id isn't present.
+export function buildPickedPhaseState(
+  state: AssistState,
+  phaseId: string,
+): AssistState | null {
+  if (!state.shape) return null
+  const phases = state.shape.phases
+  const idx = phases.findIndex((p) => p.id === phaseId)
+  if (idx === -1) return null
+  const updatedPhases = phases.map((p, i) => ({
+    ...p,
+    status:
+      i < idx
+        ? ('done' as const)
+        : i === idx
+          ? ('in_progress' as const)
+          : ('not_started' as const),
+  }))
+  return {
+    ...state,
+    shape: { ...state.shape, phases: updatedPhases },
+    position: {
+      current_phase_id: phaseId,
+      blockers: state.position?.blockers ?? [],
+      notes: state.position?.notes ?? null,
+    },
+  }
+}
+
 // Persists an assist state without going through the model — used when the
 // user makes a direct UI gesture (e.g. "I'm here" on a shape phase) that
 // deterministically updates state. Writes an agent_run row + ticket_event.
