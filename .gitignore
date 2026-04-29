@@ -33,3 +33,6 @@ supabase/.env
 .env
 .env.*
 !.env.example
+
+# Eval run snapshots (regenerated each run)
+server/lib/__evals__/last-run.json

@@ -14,8 +14,22 @@ vi.mock('@google/genai', () => ({
     BOOLEAN: 'BOOLEAN',
     INTEGER: 'INTEGER',
     ARRAY: 'ARRAY',
+    NUMBER: 'NUMBER',
   },
 }))
+
+// Helper: mock the classifier as 'other' with low confidence so the fast
+// path falls through to the main model. Used by tests that exercise the
+// model path on the first shape turn.
+function mockClassifierFallthrough() {
+  generateContent.mockResolvedValueOnce({
+    text: JSON.stringify({
+      archetype: 'other',
+      confidence: 0.3,
+      signals: [],
+    }),
+  })
+}
 
 async function makeApp() {
   const { default: route } = await import('./assist-walkthrough.js')
@@ -52,6 +66,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('shape phase: starts with empty state and returns a shape', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         assistant_message: "Here's how I see the shape of this.",
@@ -178,6 +193,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('502 on malformed JSON', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({ text: 'not json' })
     const app = await makeApp()
     const res = await request(app)
@@ -188,6 +204,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('502 when assistant_message is missing', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({ shape: { phases: [], completion_criteria: [], inputs_needed: [] } }),
     })
@@ -224,6 +241,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('drops invalid date strings from ticket_updates', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         assistant_message: 'noted',
@@ -239,6 +257,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('returns null ticket_updates when nothing meaningful was set', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         assistant_message: 'OK',
@@ -254,6 +273,7 @@ describe('POST /api/assist/walkthrough', () => {
 
   it('shape phases carry category through to the response', async () => {
     process.env.GEMINI_API_KEY = 'k'
+    mockClassifierFallthrough()
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         assistant_message: 'Here is the shape.',
@@ -273,6 +293,164 @@ describe('POST /api/assist/walkthrough', () => {
       .send({ ticket: TICKET, state: null })
     expect(res.body.state.shape.phases[0].category).toBe('deciding')
     expect(res.body.state.shape.phases[1].category).toBe('waiting')
+  })
+
+  describe('first-shape-turn fast path', () => {
+    it('serves a template directly on high-confidence classification', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          archetype: 'event_planning',
+          confidence: 0.95,
+          signals: ['birthday'],
+        }),
+      })
+
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: { title: "Plan Katja's birthday" }, state: null })
+
+      expect(res.status).toBe(200)
+      expect(generateContent).toHaveBeenCalledTimes(1) // classifier only — no main model
+      expect(res.body.template_used).toBe('event_planning')
+      expect(res.body.classifier).toMatchObject({
+        archetype: 'event_planning',
+        confidence: 0.95,
+      })
+      expect(res.body.state.phase).toBe('shape')
+      expect(res.body.state.shape.phases.length).toBeGreaterThanOrEqual(3)
+      expect(res.body.state.shape.goal).toContain("Plan Katja's birthday")
+      expect(res.body.ticket_updates).toMatchObject({ type: 'task' })
+      expect(res.body.ready_to_advance).toBe(false)
+    })
+
+    it('falls through to model when confidence is below threshold', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          archetype: 'event_planning',
+          confidence: 0.5,
+          signals: ['party'],
+        }),
+      })
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'OK, model handled it.',
+          shape: { phases: [], completion_criteria: [], inputs_needed: [] },
+        }),
+      })
+
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: { title: 'Maybe a party' }, state: null })
+
+      expect(res.status).toBe(200)
+      expect(generateContent).toHaveBeenCalledTimes(2)
+      expect(res.body.template_used).toBeNull()
+      expect(res.body.classifier).toMatchObject({ archetype: 'event_planning' })
+
+      // The second call (main model) should have received the classifier hint.
+      const mainPrompt = generateContent.mock.calls[1][0].contents as string
+      expect(mainPrompt).toContain('Classifier hint')
+      expect(mainPrompt).toContain('event_planning')
+    })
+
+    it('falls through to model on "other" classification, even at high confidence', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          archetype: 'other',
+          confidence: 0.95,
+          signals: ['vague'],
+        }),
+      })
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'OK',
+          shape: { phases: [], completion_criteria: [], inputs_needed: [] },
+        }),
+      })
+
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: { title: 'Sort out the kitchen' }, state: null })
+
+      expect(generateContent).toHaveBeenCalledTimes(2)
+      expect(res.body.template_used).toBeNull()
+      expect(res.body.classifier).toMatchObject({ archetype: 'other' })
+    })
+
+    it('falls through silently when the classifier errors', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockRejectedValueOnce(new Error('flash boom'))
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'OK',
+          shape: { phases: [], completion_criteria: [], inputs_needed: [] },
+        }),
+      })
+
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+
+      expect(res.status).toBe(200)
+      expect(generateContent).toHaveBeenCalledTimes(2)
+      expect(res.body.template_used).toBeNull()
+      expect(res.body.classifier).toBeNull()
+    })
+
+    it('does not run on subsequent shape turns (state.shape already set)', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'refining',
+          shape: { phases: [], completion_criteria: [], inputs_needed: [] },
+        }),
+      })
+
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'shape',
+            shape: {
+              goal: 'g',
+              phases: [],
+              completion_criteria: [],
+              inputs_needed: [],
+            },
+            position: null,
+            next_steps: null,
+            messages: [],
+          },
+        })
+
+      expect(generateContent).toHaveBeenCalledTimes(1) // skipped classifier
+    })
+
+    it('does not run when user_message is present', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'noted',
+          shape: { phases: [], completion_criteria: [], inputs_needed: [] },
+        }),
+      })
+
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null, user_message: 'hi' })
+
+      expect(generateContent).toHaveBeenCalledTimes(1) // skipped classifier
+    })
   })
 
   it('next_steps phase: caps at 5', async () => {
