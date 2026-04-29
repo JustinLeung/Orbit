@@ -31,6 +31,20 @@ type FormState = {
   context: string
 }
 
+export type TicketCreatePrefill = Partial<{
+  title: string
+  description: string | null
+  type: TicketType
+  status: TicketStatus
+  goal: string | null
+  next_action: string | null
+  next_action_at: string | null
+  urgency: number | null
+  importance: number | null
+  energy_required: number | null
+  context: string | null
+}>
+
 const EMPTY: FormState = {
   title: '',
   description: '',
@@ -45,32 +59,63 @@ const EMPTY: FormState = {
   context: '',
 }
 
+// ISO datetime → "yyyy-MM-ddTHH:mm" in local tz, for <input type="datetime-local">
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromPrefill(
+  prefill: TicketCreatePrefill | undefined,
+  defaultStatus: TicketStatus | undefined,
+): FormState {
+  return {
+    ...EMPTY,
+    status: prefill?.status ?? defaultStatus ?? 'inbox',
+    title: prefill?.title ?? '',
+    description: prefill?.description ?? '',
+    type: prefill?.type ?? 'task',
+    goal: prefill?.goal ?? '',
+    next_action: prefill?.next_action ?? '',
+    next_action_at: isoToLocalInput(prefill?.next_action_at),
+    urgency: prefill?.urgency != null ? String(prefill.urgency) : '',
+    importance: prefill?.importance != null ? String(prefill.importance) : '',
+    energy_required:
+      prefill?.energy_required != null ? String(prefill.energy_required) : '',
+    context: prefill?.context ?? '',
+  }
+}
+
 export function TicketCreateDialog({
   open,
   onOpenChange,
   onCreated,
   defaultStatus,
+  prefill,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated?: (ticket: Ticket) => void
   defaultStatus?: TicketStatus
+  prefill?: TicketCreatePrefill
 }) {
-  const [form, setForm] = useState<FormState>(() => ({
-    ...EMPTY,
-    status: defaultStatus ?? 'inbox',
-  }))
+  const [form, setForm] = useState<FormState>(() =>
+    fromPrefill(prefill, defaultStatus),
+  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Reset form whenever the dialog opens.
   useEffect(() => {
     if (open) {
-      setForm({ ...EMPTY, status: defaultStatus ?? 'inbox' })
+      setForm(fromPrefill(prefill, defaultStatus))
       setError(null)
       setSubmitting(false)
     }
-  }, [open, defaultStatus])
+  }, [open, defaultStatus, prefill])
 
   const titleValid = form.title.trim().length > 0
 
@@ -111,12 +156,13 @@ export function TicketCreateDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <Dialog.Content
           className={cn(
-            'fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l bg-background shadow-lg',
+            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(720px,90vh)] w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right',
+            'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+            'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
           )}
           aria-describedby={undefined}
         >
