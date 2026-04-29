@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { Type } from '@google/genai'
 import { getGemini, GEMINI_MODEL } from '../lib/gemini.js'
+import {
+  classifyArchetype,
+  ARCHETYPE_TICKET_TYPE,
+  type ClassifyResult,
+} from '../lib/classifyArchetype.js'
+import { getTemplate } from '../lib/shapeTemplates.js'
 import type {
   AssistPhase,
   AssistQuestionKind,
@@ -13,6 +19,11 @@ import type {
   TicketSnapshot,
 } from '../lib/assistTypes.js'
 import { formatPlaybookBlock } from '../lib/phasePlaybooks.js'
+
+// Above this confidence, a templated archetype short-circuits the main
+// model call and serves a canned shape. Below it, we fall through to
+// the model but pass the classifier verdict as a soft hint.
+const TEMPLATE_CONFIDENCE_THRESHOLD = 0.75
 
 const router = Router()
 
@@ -50,13 +61,13 @@ Cross-cutting:
 - During shape: produce the whole shape. During refine: return an updated \`shape\` (the same phases with the current phase's action improved) AND an updated \`position\` if blockers/notes changed.
 - When you think the current phase is complete, set "ready_to_advance": true. This tells the client the loop can be marked done.
 - "next_question" — When you need information from the user that you can't infer from the ticket, emit ONE question instead of refining immediately. Object with: id (stable string), kind ('choice' | 'multi_select' | 'short_text' | 'long_text'), prompt (one-line question), options (REQUIRED for choice/multi_select; 2-5 plausible options drawn from the ticket's specifics), allow_other (optional boolean for choice/multi_select — adds an "Other (specify)" option), placeholder (optional, for short_text/long_text). PREFER 'choice' over text whenever you can list 2-5 plausible options. Use 'short_text' for names/dates/numbers. Use 'long_text' ONLY when the answer truly cannot fit a list (e.g. an explanation or constraint). Ask ONE question per turn — never stack. When you have enough info, omit next_question and produce/refine the shape instead. The user's previous answer (if any) is in the conversation log as a labelled Q/A.
-- "ticket_updates" — Actively capture concrete facts the user shares (dates, venues, names, links, decisions, deadlines, dress codes, etc.) into the right ticket fields each turn. Whenever the conversation gives you a confident value, include it. Be SURGICAL: only set a field when the value is genuinely better than what's on the ticket. NEVER overwrite the title. NEVER invent facts. Field guidance:
+- "ticket_updates" — Actively capture concrete facts the user shares (dates, venues, names, links, decisions, deadlines, dress codes, etc.) into the right ticket fields each turn. Whenever the conversation gives you a confident value, include it. Be SURGICAL on goal/description/next_action/type — only set when genuinely better than what's on the ticket. NEVER overwrite the title. NEVER invent facts. Field guidance:
     * goal — set during shape phase if you've articulated a clear goal
     * description — 1-2 sentence summary of what this loop is about; refresh whenever there's meaningfully new info
     * next_action — during refine, set to the current phase's refined \`action\` so the ticket reflects what the user should do next. Must match a phase's \`action\` text exactly.
     * next_action_at — ONLY if the user has explicitly stated a date or time (e.g. "the wedding is May 18", "Sam needs it by Friday"). Never guess. Output as ISO 8601 (with timezone if known, otherwise local-naive is fine, e.g. "2026-05-18T16:00").
     * type — only if the loop is clearly 'research', 'decision', 'follow_up', 'admin', or 'relationship' rather than the default 'task'
-    * context — append-style: capture concrete details the user mentions that aren't a goal/description but matter (venue, dress code, address, links, key constraints). Preserve existing context when adding to it.
+    * context — ALWAYS write relevant details here whenever the user provides them. This is the persistent "details section" of the ticket — the durable record of every concrete fact the user has shared (people, dates, venues, addresses, links, budget, constraints, decisions, dress codes, preferences, anything specific). Append-style: preserve everything already in context, and add the new facts in a clean, readable format (short labelled lines or a tight bulleted list). Do NOT drop existing details. Do NOT paraphrase facts away. If the user mentioned even one new concrete detail this turn, include an updated context value. Only omit context when the turn truly contained no new factual detail.
     * definition_of_done — full-list replace. Concrete completion criteria as { item, done } pairs. Best populated during shape phase when you articulate completion_criteria. If the user mentions something is already done, set done: true. Only output when you can write a meaningfully better list than what's currently there; otherwise omit.
     * open_questions_to_add — APPEND-ONLY list of strings. Use this when you ask a clarifying question or surface an unknown the user can't immediately answer. Phrase as a question. Don't re-add questions already in the ticket's open_questions (they're shown to you).
     * references_to_add — APPEND-ONLY list of typed pointers to source material the user mentions (URLs, document titles, email subjects, file names). Each entry is { kind, url_or_text, label?: string }. kind ∈ 'link' | 'snippet' | 'attachment' | 'email' | 'other'. Don't re-add references already shown to you.
@@ -578,10 +589,16 @@ function buildPrompt(
   state: AssistState,
   userMessage: string | null,
   advanced: boolean,
+  classifierHint: ClassifyResult | null,
 ): string {
   const today = new Date().toISOString().slice(0, 10)
   const lines: string[] = [`Today's date: ${today}`, '']
   lines.push(`Current phase: ${state.phase}`)
+  if (classifierHint) {
+    lines.push(
+      `Classifier hint: this looks like "${classifierHint.archetype}" (confidence ${classifierHint.confidence.toFixed(2)}). Use as a soft suggestion only — don't force-fit.`,
+    )
+  }
   if (advanced) {
     lines.push(
       `The user just clicked "Continue" — they want to start this phase now. Open with a brief, warm opener tailored to the new phase.`,
@@ -726,6 +743,64 @@ router.post('/', async (req, res) => {
       ? body.user_message.trim()
       : null
 
+  // First-turn shape fast path: when the user opens a fresh loop with no
+  // shape yet and no message of their own, route the title through the
+  // classifier. If it matches a templated archetype with high confidence,
+  // serve the template directly and skip the heavier model call. Any
+  // failure (no API key, network, parse error) falls through silently —
+  // we never surface classifier outages to the user.
+  let classifierHint: ClassifyResult | null = null
+  if (
+    activeState.phase === 'shape' &&
+    !activeState.shape &&
+    !body.advance &&
+    userMessage === null
+  ) {
+    try {
+      const classified = await classifyArchetype(ticket.title, ticket.description)
+      classifierHint = classified
+      const template =
+        classified.confidence >= TEMPLATE_CONFIDENCE_THRESHOLD &&
+        classified.archetype !== 'other'
+          ? getTemplate(classified.archetype)
+          : null
+      if (template) {
+        const templateUsed = classified.archetype
+        const shape = template.buildShape(ticket.title)
+        const opener = template.buildOpener(ticket.title)
+        const nextState: AssistState = {
+          phase: 'shape',
+          shape,
+          position: activeState.position,
+          next_question: activeState.next_question ?? null,
+          messages: [
+            ...activeState.messages,
+            {
+              role: 'assistant',
+              text: opener,
+              ts: new Date().toISOString(),
+            },
+          ],
+        }
+        const ticketUpdates = sanitizeTicketUpdates({
+          goal: shape.goal,
+          type: ARCHETYPE_TICKET_TYPE[classified.archetype] as TicketUpdates['type'],
+        })
+        return res.json({
+          state: nextState,
+          assistant_message: opener,
+          ready_to_advance: false,
+          ticket_updates: ticketUpdates,
+          classifier: classified,
+          template_used: templateUsed,
+        })
+      }
+    } catch (err) {
+      // Silent fallthrough — log only.
+      console.warn('[assist/walkthrough] classifier failed, falling through', err)
+    }
+  }
+
   // Append the user message to messages BEFORE the call so the prompt sees it.
   const messagesWithUser: AssistState['messages'] = userMessage
     ? [
@@ -742,7 +817,13 @@ router.post('/', async (req, res) => {
   try {
     const result = await ai.models.generateContent({
       model: GEMINI_MODEL,
-      contents: buildPrompt(ticket, promptState, userMessage, !!body.advance),
+      contents: buildPrompt(
+        ticket,
+        promptState,
+        userMessage,
+        !!body.advance,
+        classifierHint,
+      ),
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: 'application/json',
@@ -819,6 +900,8 @@ router.post('/', async (req, res) => {
       ready_to_advance: parsed.ready_to_advance === true,
       ticket_updates: sanitizeTicketUpdates(parsed.ticket_updates),
       next_question: nextQuestion,
+      classifier: classifierHint,
+      template_used: null,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

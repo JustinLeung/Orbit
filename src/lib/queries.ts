@@ -563,6 +563,9 @@ export async function runAssistTurn(args: {
     }
   }
 
+  const classifier = body.classifier ?? null
+  const templateUsed = body.template_used ?? null
+
   const { error: runErr } = await supabase.from('agent_runs').insert({
     user_id: userId,
     ticket_id: ticket.id,
@@ -570,6 +573,8 @@ export async function runAssistTurn(args: {
       snapshot,
       prev_state: args.state,
       advance: args.advance ?? false,
+      classifier,
+      template_used: templateUsed,
     },
     output: JSON.stringify(nextState),
     needs_feedback: false,
@@ -584,6 +589,7 @@ export async function runAssistTurn(args: {
       agent: 'walkthrough',
       phase: nextState.phase,
       applied_field_count: applied.length,
+      template_used: templateUsed,
     },
   })
   if (evtErr) console.error('agent_ran event insert failed', evtErr)
