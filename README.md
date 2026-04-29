@@ -6,8 +6,7 @@ Every commitment becomes a ticket with a state, next action, history, and option
 
 > **Tagline:** Keep every open loop in motion.
 
-See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec, and
-[`docs/`](./docs) for per-area "how it works" guides
+See [`docs/`](./docs) for per-area "how it works" guides
 ([architecture](./docs/architecture.md),
 [auth](./docs/auth.md),
 [tickets](./docs/tickets.md),
@@ -354,5 +353,3 @@ keeps using `npm run seed` with its own custom data.
 - [ ] People CRUD + per-person ticket list
 - [ ] Assist mode on existing tickets → Gemini, writing into `agent_runs`
 - [ ] Review queue UI for agent output
-
-See [`PLAN.md`](./PLAN.md) for what's *intentionally* out of scope for MVP.

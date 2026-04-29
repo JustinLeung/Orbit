@@ -3,7 +3,6 @@
 These are the deeper "how each part of the app works" guides. Top-level docs:
 
 - [`../README.md`](../README.md) — how to run, configure, and contribute. Start here if you've just cloned the repo.
-- [`../PLAN.md`](../PLAN.md) — product spec and MVP scope. Read this before doing UX work.
 
 Per-area:
 

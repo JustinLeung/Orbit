@@ -12,11 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/tickets/form-helpers'
 import { PhaseCategoryPill } from '@/components/tickets/PhaseCategoryPill'
-import {
-  ASSIST_QUESTIONS,
-  formatStructuredAnswers,
-  type AssistQuestion,
-} from '@/components/tickets/assistQuestions'
+import { resolveAgent } from '@/components/tickets/agents'
 import { cn } from '@/lib/utils'
 import {
   markAssistBootstrapped,
@@ -132,20 +128,22 @@ export function TicketAssistPanel({
     if (override !== null) setOverride(null)
   }
 
-  async function submitStructured(answers: Record<string, string>) {
-    if (!state || !state.shape) return
-    const phaseId = state.position?.current_phase_id
-    const phase = state.shape.phases.find((p) => p.id === phaseId)
-    if (!phase) return
-    const message = formatStructuredAnswers(phase.category, phase.title, answers)
-    // Advance from 'shape' → 'refine' on first submit; subsequent submits
-    // stay in 'refine'.
-    await doTurn({
+  // Wrapped doTurn for per-phase agents. Agents emit (userMessage, advance)
+  // tuples; the panel owns state and busy/error/lastApplied. We close
+  // the refine surface on a successful turn so the post-refine action
+  // becomes the primary thing the user sees again.
+  async function agentRunTurn(args: {
+    userMessage: string | null
+    advance: boolean
+  }) {
+    if (!state) return null
+    const result = await doTurn({
       state,
-      userMessage: message,
-      advance: state.phase === 'shape',
+      userMessage: args.userMessage,
+      advance: args.advance,
     })
-    setRefiningOpen(false)
+    if (result && args.userMessage) setRefiningOpen(false)
+    return result?.state ?? null
   }
 
   async function setNextAction(title: string) {
@@ -192,6 +190,10 @@ export function TicketAssistPanel({
   const currentPhase =
     shape?.phases.find((p) => p.id === currentPhaseId) ?? null
   const isDone = state?.phase === 'done'
+  // Resolve the per-phase agent. Defaults to the static-form agent when
+  // the category doesn't have a bespoke entry yet — preserves the
+  // pre-dispatcher behavior for research/doing/waiting/deciding/closing.
+  const Agent = currentPhase ? resolveAgent(currentPhase.category) : null
   // While we're still in the initial shape phase and a current phase has
   // been picked, surface the questions form by default — that's how we
   // help the assistant help. Once we've refined at least once
@@ -283,15 +285,20 @@ export function TicketAssistPanel({
             </div>
           ) : null}
 
-          {showQuestions && currentPhase ? (
-            <StructuredQuestionsForm
-              // key keyed on phase id so picking a different phase remounts
-              // the form with empty answers — no setState-in-effect needed.
+          {showQuestions && currentPhase && state && Agent ? (
+            // eslint-disable-next-line react-hooks/static-components
+            <Agent
+              // Remount on phase change so any local state in the agent
+              // (answer drafts, kickoff guards) resets cleanly.
               key={currentPhase.id}
+              ticket={liveTicket}
+              state={state}
               phase={currentPhase}
               busy={busy}
+              loadingState={loadingState}
+              refiningOpen={refiningOpen}
               onCancel={() => setRefiningOpen(false)}
-              onSubmit={submitStructured}
+              runTurn={agentRunTurn}
             />
           ) : null}
 
@@ -630,104 +637,3 @@ function PhaseStatusIcon({ status }: { status: ShapePhaseStatus }) {
   return <Circle className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
 }
 
-function StructuredQuestionsForm({
-  phase,
-  busy,
-  onCancel,
-  onSubmit,
-}: {
-  phase: ShapePhaseEntry
-  busy: boolean
-  onCancel: () => void
-  onSubmit: (answers: Record<string, string>) => Promise<void>
-}) {
-  const questions = ASSIST_QUESTIONS[phase.category]
-  // Parent passes a unique key per phase id, so this component remounts
-  // with empty answers on phase change. No effect needed.
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const anyAnswer = Object.values(answers).some((v) => v.trim() !== '')
-
-  return (
-    <form
-      className="space-y-3 rounded-md border bg-background p-3"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!anyAnswer) return
-        void onSubmit(answers)
-      }}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Refine the action for this phase
-          </p>
-          <p className="text-sm">{phase.title}</p>
-        </div>
-        <PhaseCategoryPill category={phase.category} />
-      </div>
-      <div className="space-y-2.5">
-        {questions.map((q) => (
-          <QuestionField
-            key={q.id}
-            question={q}
-            value={answers[q.id] ?? ''}
-            onChange={(v) =>
-              setAnswers((cur) => ({ ...cur, [q.id]: v }))
-            }
-            disabled={busy}
-          />
-        ))}
-      </div>
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onCancel}
-          disabled={busy}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={busy || !anyAnswer}>
-          {busy ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              Refining…
-            </>
-          ) : (
-            <>
-              Refine action
-              <ArrowRight className="h-3 w-3" aria-hidden />
-            </>
-          )}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
-function QuestionField({
-  question,
-  value,
-  onChange,
-  disabled,
-}: {
-  question: AssistQuestion
-  value: string
-  onChange: (v: string) => void
-  disabled: boolean
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs text-muted-foreground">{question.label}</span>
-      <Textarea
-        rows={question.multiline ? 2 : 1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={question.placeholder}
-        disabled={disabled}
-        className="text-sm"
-      />
-    </label>
-  )
-}

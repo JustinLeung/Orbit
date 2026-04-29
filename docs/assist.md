@@ -11,8 +11,11 @@ Goal: turn "this open loop is fuzzy" into "here's the concrete next thing I'm do
 | `server/routes/assist-walkthrough.ts` | The Gemini call. Owns the system prompt, the JSON schema the model must emit, and the `ticket_updates` sanitizer. |
 | `server/lib/gemini.ts` | Cached `@google/genai` client. Returns `null` if `GEMINI_API_KEY` isn't set, so the route can 503 cleanly. |
 | `server/lib/assistTypes.ts` / `src/lib/assistTypes.ts` | Mirror of the wire types (`AssistPhase`, `Shape`, `ShapePhaseEntry`, `Position`, `AssistState`). Duplicated because client + server have separate tsconfigs. |
+| `server/lib/phasePlaybooks.ts` | Per-`PhaseCategory` "playbook" — what completion looks like, which `ticket_updates` to prioritize, the shape the refined `action` should take, and an `interview?: boolean` opt-in that splices the shared `INTERVIEW_HINTS` (one-at-a-time + MC-preferred + no-re-ask) into the prompt. Spliced into the prompt during `refine`. |
+| `src/components/tickets/agents/` | Per-`PhaseCategory` agent components. `index.ts` holds the `PHASE_AGENTS` registry + `resolveAgent` dispatcher. `types.ts` defines the `AgentProps` contract. `PlanningAgent.tsx` owns the interview flow; `DefaultAgent.tsx` is the static-form fallback used by every category without a bespoke entry. |
 | `src/components/tickets/TicketAssistPanel.tsx` | The inline UI inside `TicketDetailDialog`. Drives shape generation, phase selection, structured-question rendering, refines, "set as next action", and follow-up chat. |
-| `src/components/tickets/assistQuestions.ts` | Static catalog: per `PhaseCategory` → which structured questions to ask. Plus `formatStructuredAnswers()` which turns the user's answers into the `user_message` we send to the model. |
+| `src/components/tickets/assistQuestions.ts` | Static catalog: per `PhaseCategory` → which structured questions to ask. Plus `formatStructuredAnswers()` which turns the user's answers into the `user_message` we send to the model. Used for non-planning categories. |
+| `src/components/tickets/DynamicQuestionForm.tsx` / `dynamicQuestionAnswer.ts` | UI for ONE model-asked question (multiple choice / multi-select / short text / long text). Used for planning-category phases where the model interviews the user instead of refining straight away. |
 | `src/components/tickets/PhaseCategoryPill.tsx` | Small label component for the six phase categories. |
 | `src/lib/queries.ts` (`runAssistTurn`, `persistAssistState`, `useLatestAssistState`) | Orchestrates a turn: snapshot the ticket, call the route, apply `ticket_updates`, persist state, write events. |
 
@@ -89,7 +92,7 @@ The cost of this choice:
 - Every turn writes a new row instead of updating one. Cheap, but `agent_runs` grows linearly with assist usage.
 - `useLatestAssistState` always reads the newest row by `created_at desc`. There's no row-id concept of "the current state."
 
-The follow-up to migrate this to a dedicated `tickets.assist_state` JSONB column is tracked in `PLAN.md` § Assist Mode Can.
+A planned follow-up is to migrate this to a dedicated `tickets.assist_state` JSONB column instead of the latest `agent_runs` row.
 
 ## "Set as next action" without a model call
 
@@ -97,9 +100,154 @@ When the user just wants to grab a phase's `action` as the ticket's next_action,
 
 This is also how `setRefiningOpen` keeps state in sync after the user picks a phase but before answering questions — a deterministic UI gesture that updates `position.current_phase_id`.
 
+## Per-category playbooks
+
+Each `PhaseCategory` has a "playbook" in `server/lib/phasePlaybooks.ts` that
+tells the model three things specific to that category:
+
+- **completion** — what "this phase is done" looks like (drives
+  `ready_to_advance`).
+- **specific_helps** — which `ticket_updates` fields to prioritize this turn
+  (e.g. research → `references_to_add` + `open_questions_to_add`; waiting →
+  `next_action_at`; closing → flipping DoD items to `done`).
+- **action_shape** — the verb-and-object shape the refined `action` should
+  take (e.g. waiting → "Nudge P via channel by date"; deciding → "Pick
+  between A and B by date").
+
+`buildPrompt` injects the playbook for the user's currently selected phase
+during `refine` only. `shape` prompts stay lean — the cosmetic per-category
+descriptions were trimmed from the system prompt because the playbook now
+carries the meaningful steer. The structured questions in
+`src/components/tickets/assistQuestions.ts` are aligned to these playbooks
+(e.g. research's `good_enough` question maps to research's completion bar).
+
+Behavioral evals against live Gemini live in
+`server/routes/assist-walkthrough.evals.test.ts` and are gated by
+`RUN_LIVE_EVALS=1`. Run with:
+
+```bash
+GEMINI_API_KEY=… RUN_LIVE_EVALS=1 npx vitest run server/routes/assist-walkthrough.evals.test.ts
+```
+
+## Single-step vs multi-step classification
+
+On bootstrap (no user message yet, no prior shape) the system prompt asks
+the model to **first classify** the ticket as single-step or multi-step
+and bias toward fewer phases:
+
+- **Single-step** ("Call mom", "Take out the trash", "Book a flight",
+  "Reply to Sam") → exactly **1** phase. No decomposition.
+- **Multi-step** ("Plan a party", "Buy a Mother's Day gift", "Organize the
+  team offsite") → 3-5 phases.
+
+The classification *is* `phases.length` — there's no separate wire field.
+The `TicketPlanRail` reads `phases.length === 1` to render the
+`AddStepInline` affordance with `tone: 'primary'` ("Got more steps? Add
+them here") so the user can grow the ticket into a multi-step plan
+without going back through the model. Multi-step rails get the same
+component in `tone: 'secondary'` (a quiet "+ Add a step" link at the
+bottom).
+
+Adding a step goes through `addPhaseToShape` in `src/lib/queries.ts`,
+which is a thin wrapper around `persistAssistState` (no model call). The
+new phase gets a stable `user-N` id, the user-typed title as both `title`
+and `action`, the user-selected category (defaulting to `doing`), and
+status `not_started`. Picking it as the current phase later kicks in the
+normal refine flow.
+
+### Suggested adjacent steps
+
+To complement the bias toward fewer phases, the model also emits 1-3
+`suggested_steps` on the `Shape`: optional adjacent actions a thoughtful
+user might want to add but that aren't strictly required (e.g. for
+"Change lightbulb" → "Buy lightbulb" before the change phase; for "Buy a
+Mother's Day gift" → "Wrap the gift" after it). Each suggestion carries
+its own `position` ('before' | 'after' | 'end') and `anchor_phase_id`.
+
+The route's `sanitizeSuggestedSteps` validates each entry, drops any that
+duplicate an existing phase title (case-insensitive), falls back to
+`position: 'end'` when an `anchor_phase_id` doesn't resolve, and caps the
+list at 5.
+
+`SuggestedSteps` (`src/components/tickets/SuggestedSteps.tsx`) renders
+the list as one-click chips above `AddStepInline` in the rail. Click →
+`acceptSuggestedStep` → `insertPhaseAtPosition` inserts at the declared
+position via `persistAssistState` (no model call). The chip filters
+client-side on title-match against existing phases, so accepted
+suggestions disappear naturally without a separate dismissed-ids store.
+
+## Per-phase agents
+
+Each `PhaseCategory` gets its own agent component that owns the refine
+surface for that phase. `TicketAssistPanel` dispatches through the
+`PHASE_AGENTS` registry in `src/components/tickets/agents/index.ts`:
+
+```ts
+PHASE_AGENTS: Partial<Record<PhaseCategory, AgentComponent>> = {
+  planning: PlanningAgent,
+  // research / doing / waiting / deciding / closing → DEFAULT_AGENT
+}
+```
+
+Categories without a bespoke entry fall back to `DEFAULT_AGENT` (the
+static structured-questions form). Adding a per-phase agent is two
+files: a new component in `agents/`, and a one-line registry entry.
+
+### `AgentProps` contract
+
+Every agent receives the same props (`src/components/tickets/agents/types.ts`):
+
+- `ticket`, `state`, `phase` — the current ticket, assist state, and
+  resolved current phase entry.
+- `busy`, `loadingState`, `refiningOpen` — UI state owned by the panel.
+- `onCancel` — closes the refine surface.
+- `runTurn({userMessage, advance})` — emits a turn through the model;
+  resolves to the new `AssistState` (or `null` on failure).
+
+The agent owns its own kickoff effects (e.g. `PlanningAgent` fires a
+no-message turn when the panel wants to refine but the model hasn't
+asked anything yet). State (override, busy, lastApplied, error) is
+owned by `TicketAssistPanel` — agents are pure render + emit.
+
+### Generalized interview pattern
+
+The one-question-at-a-time interview is no longer planning-only. Any
+playbook can opt in by setting `interview: true`; the shared
+`INTERVIEW_HINTS` block (one-at-a-time, MC-preferred, no-re-ask, dedupe
+rules) gets spliced into the prompt's playbook block by
+`formatPlaybookBlock`. `PlanningAgent` consumes `state.next_question`
+and renders `DynamicQuestionForm`; future agents (doing's "I'm stuck"
+mini-interview, deciding's tiebreaker, closing's DoD walk) reuse the
+same wire/UI primitives by opting their playbooks in.
+
+## Planning is an interview, not a form
+
+The `planning` category is special: instead of showing the static 3-question
+form, the model drives a **one-question-at-a-time interview** via the
+`next_question` field on `AssistState`. The playbook tells the model to:
+
+- Emit `next_question` (kind: `choice` | `multi_select` | `short_text` |
+  `long_text`) when scope, constraints, or options are unclear, **before**
+  refining the action.
+- Prefer `choice` with 2-5 plausible options drawn from the ticket's
+  specifics. Use `short_text` for names/dates/numbers. Use `long_text`
+  only when the answer truly cannot fit a list.
+- Ask **one** question per turn — never stack.
+- Stop interviewing once it has enough info to write a concrete plan.
+
+`TicketAssistPanel` auto-kicks off a turn when a planning phase is opened
+with no pending question, then renders `DynamicQuestionForm` (radio /
+checkboxes / input / textarea per kind). The user's answer becomes a
+labelled `Q: …\nA: …` `user_message` for the next turn — same wire format
+as the static questions.
+
+Other categories continue using the static 2-4 question form. The
+`next_question` field is wire-supported for all categories, but only the
+planning playbook actively tells the model to use it.
+
 ## Structured questions vs. free chat
 
-Each `PhaseCategory` has a 2-4 question prompt set in `src/components/tickets/assistQuestions.ts`. When the user submits answers, `formatStructuredAnswers()` collapses them into a single `user_message` shaped like:
+Each non-planning `PhaseCategory` has a 2-4 question prompt set in `src/components/tickets/assistQuestions.ts`. When the user submits answers, `formatStructuredAnswers()` collapses them into a single `user_message` shaped like:
 
 ```
 Q: What outcome would tell you this phase is done?

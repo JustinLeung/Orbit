@@ -8,9 +8,6 @@ explain *why* the code is shaped the way it is, not just what's in it.
 - [`README.md`](./README.md) — how to run, configure, deploy, and contribute.
   Source of truth for env vars, ports, scripts, project layout, roadmap.
   Read this if you've just cloned the repo.
-- [`PLAN.md`](./PLAN.md) — product spec and MVP scope. Source of truth for
-  the data model field list, ticket types/statuses, and what's intentionally
-  out of scope. Read this before doing UX or schema work.
 - [`docs/`](./docs) — per-area "how it works" guides. See
   [`docs/README.md`](./docs/README.md) for the index. Specifically:
   - [architecture](./docs/architecture.md) — SPA + Express + Supabase split,
@@ -33,9 +30,9 @@ by audience:
 | Change | Update |
 | --- | --- |
 | Env vars, scripts, ports, deploy steps, project layout | `README.md` |
-| Stack or tooling swap (auth provider, AI provider, framework version) | `README.md` + `PLAN.md` ("Stack (decided)") |
-| Schema change (new table/column/enum value) | `README.md` ("Data model summary") + `PLAN.md` (field list) + [`docs/database.md`](./docs/database.md) |
-| Roadmap item shipped or new follow-up | `README.md` ("Roadmap") + `PLAN.md` |
+| Stack or tooling swap (auth provider, AI provider, framework version) | `README.md` ("Stack") |
+| Schema change (new table/column/enum value) | `README.md` ("Data model summary") + [`docs/database.md`](./docs/database.md) |
+| Roadmap item shipped or new follow-up | `README.md` ("Roadmap") |
 | Behavior change inside an area with a `docs/` guide | the matching `docs/<area>.md` |
 
 If a change has no doc impact, say so explicitly when reporting the work

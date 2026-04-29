@@ -51,11 +51,27 @@ export type ShapePhaseEntry = {
   action_details: string | null
 }
 
+// Optional adjacent steps the model thinks the user might want to add.
+// Surfaced as one-click chips in the plan rail; clicking inserts at the
+// declared position. Stable across non-shape turns; the model re-emits
+// the full list whenever it returns a `shape`.
+export type SuggestedStepPosition = 'before' | 'after' | 'end'
+
+export type SuggestedStep = {
+  id: string
+  title: string
+  category: PhaseCategory
+  rationale: string | null
+  position: SuggestedStepPosition
+  anchor_phase_id: string | null
+}
+
 export type Shape = {
   goal: string | null
   phases: ShapePhaseEntry[]
   completion_criteria: string[]
   inputs_needed: string[]
+  suggested_steps: SuggestedStep[]
 }
 
 export type Position = {
@@ -64,9 +80,31 @@ export type Position = {
   notes: string | null
 }
 
+// Kinds of input the model can ask the user for in a one-at-a-time
+// interview. Multiple choice ('choice'/'multi_select') is preferred so the
+// user picks instead of types. Free-form 'long_text' is a last resort.
+export type AssistQuestionKind =
+  | 'choice'
+  | 'multi_select'
+  | 'short_text'
+  | 'long_text'
+
+export type DynamicAssistQuestion = {
+  id: string
+  kind: AssistQuestionKind
+  prompt: string
+  options?: string[] | null
+  allow_other?: boolean | null
+  placeholder?: string | null
+}
+
 export type AssistState = {
   phase: AssistPhase
   shape: Shape | null
   position: Position | null
   messages: AssistMessage[]
+  // The model's pending question for the user, if any. Currently only
+  // populated for planning-category phases — that playbook tells the model
+  // to interview rather than refine immediately.
+  next_question: DynamicAssistQuestion | null
 }

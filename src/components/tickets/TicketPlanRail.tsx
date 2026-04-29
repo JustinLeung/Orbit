@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { CalendarClock, CheckCircle2, GripVertical } from 'lucide-react'
+import { CalendarClock, CheckCircle2, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { EditableField } from '@/components/tickets/EditableField'
@@ -20,14 +20,20 @@ import {
   urgencyMeta,
 } from '@/components/tickets/status-meta'
 import {
+  acceptSuggestedStep,
+  addPhaseToShape,
   buildPickedPhaseState,
   persistAssistState,
+  removePhase,
   useLatestAssistState,
   type FieldChangeValue,
 } from '@/lib/queries'
+import { AddStepInline } from '@/components/tickets/AddStepInline'
+import { SuggestedSteps } from '@/components/tickets/SuggestedSteps'
 import type {
   AssistState,
   ShapePhaseEntry,
+  SuggestedStep,
 } from '@/lib/assistTypes'
 import type {
   Ticket,
@@ -129,6 +135,7 @@ export function TicketPlanRail({
         const nextState: AssistState = {
           ...assistState,
           shape: { ...assistState.shape, phases: reordered },
+          next_question: assistState.next_question ?? null,
         }
         persistAssistState(ticket, nextState, 'reorder_phases').then(
           () => setOrderOverride(null),
@@ -163,6 +170,53 @@ export function TicketPlanRail({
       console.error('pick phase failed', err)
     }
   }
+
+  async function addStep(input: { title: string; category: ShapePhaseEntry['category'] }) {
+    if (!assistState) return
+    const next = await addPhaseToShape(ticket, assistState, input)
+    if (!next) throw new Error('Could not add step (no shape yet)')
+  }
+
+  async function removeStep(p: ShapePhaseEntry) {
+    if (!assistState) return
+    // Mild guard for the current phase since removing it loses
+    // user-selected state (current_phase_id, any pending next_question).
+    if (
+      p.id === currentPhaseId &&
+      !window.confirm(`Remove "${p.title}"? It's the phase you're currently on.`)
+    ) {
+      return
+    }
+    try {
+      await removePhase(ticket, assistState, p.id)
+    } catch (err) {
+      console.error('remove phase failed', err)
+    }
+  }
+
+  async function acceptSuggestion(s: SuggestedStep) {
+    if (!assistState) return
+    const position =
+      s.position === 'end' || !s.anchor_phase_id
+        ? ({ kind: 'end' } as const)
+        : ({ kind: s.position, anchor_phase_id: s.anchor_phase_id } as const)
+    const next = await acceptSuggestedStep(
+      ticket,
+      assistState,
+      { id: s.id, title: s.title, category: s.category },
+      position,
+    )
+    if (!next) throw new Error('Could not accept suggestion')
+  }
+
+  // Pitch the affordance more loudly for single-step rails — the model
+  // deliberately classified this as a one-step task, so we want to make
+  // it obvious the user CAN grow it if they realize it's bigger.
+  const addStepTone: 'primary' | 'secondary' =
+    phases.length === 1 ? 'primary' : 'secondary'
+
+  const suggestedSteps: SuggestedStep[] =
+    assistState?.shape?.suggested_steps ?? []
 
   return (
     <aside
@@ -200,6 +254,7 @@ export function TicketPlanRail({
             Assist hasn't mapped a plan yet.
           </p>
         ) : (
+          <>
           <ol className="relative">
             {/* Connecting line behind step markers. */}
             <span
@@ -226,6 +281,17 @@ export function TicketPlanRail({
                     >
                       <GripVertical className="h-3.5 w-3.5" />
                     </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void removeStep(p)
+                      }}
+                      className="absolute right-1 top-1 hidden rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-destructive group-hover:block"
+                      aria-label={`Remove "${p.title}"`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => void pickPhase(p.id)}
@@ -271,6 +337,13 @@ export function TicketPlanRail({
               )
             })}
           </ol>
+          <SuggestedSteps
+            suggestions={suggestedSteps}
+            phases={phases}
+            onAccept={acceptSuggestion}
+          />
+          <AddStepInline onAdd={addStep} tone={addStepTone} />
+          </>
         )}
       </div>
 

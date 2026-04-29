@@ -18,7 +18,7 @@ import type {
   TicketUpdate,
 } from '@/types/orbit'
 import type { Json } from '@/types/database'
-import type { AssistState } from '@/lib/assistTypes'
+import type { AssistState, ShapePhaseEntry } from '@/lib/assistTypes'
 
 type State<T> = {
   data: T
@@ -137,7 +137,7 @@ export function useNowTickets() {
   )
 }
 
-// "Stuck" surfaces three cases (see PLAN.md §Stuck):
+// "Stuck" surfaces three cases:
 //   - active with no next_action
 //   - waiting with overdue next_action_at
 //   - review and not updated in 3+ days
@@ -269,8 +269,8 @@ async function ticketSnapshot(ticket: Ticket) {
 
 // We persist the full assist state in agent_runs.output (JSON-stringified) —
 // each turn appends a new row, latest = current. Semantically a stretch on a
-// "single model call" table, but avoids a migration. See PLAN.md for the
-// follow-up to move this to a dedicated tickets.assist_state column.
+// "single model call" table, but avoids a migration. A planned follow-up is
+// to move this to a dedicated tickets.assist_state column.
 //
 // Module-level cache keyed by ticketId. Two purposes:
 //   - Avoid the "Mapping out the shape…" placeholder flashing when the
@@ -371,7 +371,23 @@ export function useLatestAssistState(ticketId: string | null) {
 function parseAssistState(run: AgentRun | null | undefined): AssistState | null {
   if (!run?.output) return null
   try {
-    return JSON.parse(run.output) as AssistState
+    const parsed = JSON.parse(run.output) as Partial<AssistState>
+    // Backfill fields added after rows were originally written:
+    //   - next_question: defaults to null
+    //   - shape.suggested_steps: defaults to []
+    const shape = parsed.shape
+      ? {
+          ...parsed.shape,
+          suggested_steps: parsed.shape.suggested_steps ?? [],
+        }
+      : null
+    return {
+      phase: parsed.phase ?? 'shape',
+      shape,
+      position: parsed.position ?? null,
+      messages: parsed.messages ?? [],
+      next_question: parsed.next_question ?? null,
+    }
   } catch {
     return null
   }
@@ -615,7 +631,190 @@ export function buildPickedPhaseState(
       blockers: state.position?.blockers ?? [],
       notes: state.position?.notes ?? null,
     },
+    // Picking a different phase invalidates any pending question — it was
+    // asked about the prior phase.
+    next_question: null,
   }
+}
+
+// Pure helper for the "Add a step" affordance: appends a user-typed phase
+// to the existing shape with a stable, collision-free id and sensible
+// defaults. The user can refine the action later by clicking the phase.
+//
+// Returns null if there's no shape to append to (caller should bail —
+// nothing to add a step to). Default category is 'doing' since most
+// user-added steps describe concrete actions; the user can change it in
+// the form.
+export function appendPhaseToShape(
+  state: AssistState,
+  input: { title: string; category?: ShapePhaseEntry['category'] },
+): AssistState | null {
+  if (!state.shape) return null
+  const title = input.title.trim()
+  if (title === '') return null
+  const existingIds = new Set(state.shape.phases.map((p) => p.id))
+  // Try `user-1`, `user-2`, … until we find an unused id. Cheap, stable,
+  // human-readable in agent_runs.input_context.
+  let idx = 1
+  let id = `user-${idx}`
+  while (existingIds.has(id)) {
+    idx += 1
+    id = `user-${idx}`
+  }
+  const newPhase: ShapePhaseEntry = {
+    id,
+    title,
+    description: null,
+    status: 'not_started',
+    category: input.category ?? 'doing',
+    action: title,
+    action_details: null,
+  }
+  return {
+    ...state,
+    shape: {
+      ...state.shape,
+      phases: [...state.shape.phases, newPhase],
+    },
+  }
+}
+
+// Persisted wrapper: append a user-typed phase + write the agent_run /
+// ticket_event so history shows the addition. No model call — the user
+// already knows what step they want.
+export async function addPhaseToShape(
+  ticket: Ticket,
+  state: AssistState,
+  input: { title: string; category?: ShapePhaseEntry['category'] },
+): Promise<AssistState | null> {
+  const next = appendPhaseToShape(state, input)
+  if (!next) return null
+  await persistAssistState(ticket, next, 'add_user_phase')
+  return next
+}
+
+// Pure helper used by the suggested-steps chip click. Inserts a phase at a
+// specific position relative to an existing phase ('before' | 'after') or
+// at the end. Falls back to 'end' if the anchor phase id doesn't resolve.
+// Also: if the suggestion's id collides with an existing phase id (rare —
+// the model picks 's1' style, the user-typed phases use 'user-N'), we
+// generate a fresh user-N id so the new phase is unambiguously distinct.
+export type InsertPosition =
+  | { kind: 'end' }
+  | { kind: 'before' | 'after'; anchor_phase_id: string }
+
+export function insertPhaseAtPosition(
+  state: AssistState,
+  input: {
+    id?: string
+    title: string
+    category?: ShapePhaseEntry['category']
+    description?: string | null
+  },
+  position: InsertPosition,
+): AssistState | null {
+  if (!state.shape) return null
+  const title = input.title.trim()
+  if (title === '') return null
+  const phases = state.shape.phases
+  const existingIds = new Set(phases.map((p) => p.id))
+  let id: string
+  if (input.id && !existingIds.has(input.id)) {
+    id = input.id
+  } else {
+    let idx = 1
+    id = `user-${idx}`
+    while (existingIds.has(id)) {
+      idx += 1
+      id = `user-${idx}`
+    }
+  }
+  const newPhase: ShapePhaseEntry = {
+    id,
+    title,
+    description: input.description ?? null,
+    status: 'not_started',
+    category: input.category ?? 'doing',
+    action: title,
+    action_details: null,
+  }
+  let insertIdx = phases.length
+  if (position.kind !== 'end') {
+    const anchorIdx = phases.findIndex(
+      (p) => p.id === position.anchor_phase_id,
+    )
+    if (anchorIdx !== -1) {
+      insertIdx = position.kind === 'before' ? anchorIdx : anchorIdx + 1
+    }
+    // Anchor missing → fall through to end.
+  }
+  const nextPhases = [
+    ...phases.slice(0, insertIdx),
+    newPhase,
+    ...phases.slice(insertIdx),
+  ]
+  return {
+    ...state,
+    shape: {
+      ...state.shape,
+      phases: nextPhases,
+    },
+  }
+}
+
+// Pure helper: removes a phase by id. If the removed phase was the
+// current one, also clears position.current_phase_id and any pending
+// next_question (it was about the phase that's gone). Returns null if
+// the shape is missing or the id doesn't resolve.
+export function removePhaseFromShape(
+  state: AssistState,
+  phaseId: string,
+): AssistState | null {
+  if (!state.shape) return null
+  const phases = state.shape.phases
+  const idx = phases.findIndex((p) => p.id === phaseId)
+  if (idx === -1) return null
+  const nextPhases = phases.filter((p) => p.id !== phaseId)
+  const wasCurrent = state.position?.current_phase_id === phaseId
+  return {
+    ...state,
+    shape: { ...state.shape, phases: nextPhases },
+    position: wasCurrent
+      ? state.position
+        ? { ...state.position, current_phase_id: null }
+        : null
+      : state.position,
+    next_question: wasCurrent ? null : state.next_question,
+  }
+}
+
+// Persisted wrapper for the per-row remove affordance.
+export async function removePhase(
+  ticket: Ticket,
+  state: AssistState,
+  phaseId: string,
+): Promise<AssistState | null> {
+  const next = removePhaseFromShape(state, phaseId)
+  if (!next) return null
+  await persistAssistState(ticket, next, 'remove_phase')
+  return next
+}
+
+// Persisted wrapper for the one-click "accept this suggestion" action.
+export async function acceptSuggestedStep(
+  ticket: Ticket,
+  state: AssistState,
+  input: {
+    id?: string
+    title: string
+    category?: ShapePhaseEntry['category']
+  },
+  position: InsertPosition,
+): Promise<AssistState | null> {
+  const next = insertPhaseAtPosition(state, input, position)
+  if (!next) return null
+  await persistAssistState(ticket, next, 'accept_suggested_step')
+  return next
 }
 
 // Persists an assist state without going through the model — used when the
