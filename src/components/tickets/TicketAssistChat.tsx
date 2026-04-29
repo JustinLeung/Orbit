@@ -15,6 +15,7 @@ import { Textarea } from '@/components/tickets/form-helpers'
 import { PhaseCategoryPill } from '@/components/tickets/PhaseCategoryPill'
 import { cn } from '@/lib/utils'
 import {
+  persistAssistState,
   runAssistTurn,
   updateTicket,
   useLatestAssistState,
@@ -114,6 +115,47 @@ export function TicketAssistChat({
     await doTurn({ state, userMessage: null, advance: true })
   }
 
+  async function pickCurrentPhase(phaseId: string) {
+    if (!state || !state.shape) return
+    const phases = state.shape.phases
+    const idx = phases.findIndex((p) => p.id === phaseId)
+    if (idx === -1) return
+    const picked = phases[idx]
+    const updatedPhases = phases.map((p, i) => ({
+      ...p,
+      status:
+        i < idx
+          ? ('done' as const)
+          : i === idx
+            ? ('in_progress' as const)
+            : ('not_started' as const),
+    }))
+    const nextState: AssistState = {
+      ...state,
+      shape: { ...state.shape, phases: updatedPhases },
+      position: {
+        current_phase_id: picked.id,
+        blockers: state.position?.blockers ?? [],
+        notes: state.position?.notes ?? null,
+      },
+      messages: [
+        ...state.messages,
+        {
+          role: 'assistant',
+          text: `Marked "${picked.title}" as your current phase.`,
+          ts: new Date().toISOString(),
+        },
+      ],
+    }
+    setState(nextState)
+    setReadyToAdvance(true)
+    try {
+      await persistAssistState(ticket, nextState, 'pick_current_phase')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function setNextAction(title: string) {
     try {
       await updateTicket(
@@ -142,7 +184,14 @@ export function TicketAssistChat({
         className="flex-1 overflow-y-auto px-6 py-5 space-y-4"
       >
         {state?.shape ? (
-          <ShapeCard phases={state.shape.phases} goal={state.shape.goal} />
+          <ShapeCard
+            phases={state.shape.phases}
+            goal={state.shape.goal}
+            currentPhaseId={state.position?.current_phase_id ?? null}
+            onPickCurrent={
+              phase === 'shape' && !busy ? pickCurrentPhase : undefined
+            }
+          />
         ) : null}
 
         {state && phase !== 'shape' && state.shape ? null : null}
@@ -361,16 +410,27 @@ function PhaseStepper({ phase }: { phase: AssistPhase }) {
 function ShapeCard({
   phases,
   goal,
+  currentPhaseId,
+  onPickCurrent,
 }: {
   phases: ShapePhaseEntry[]
   goal: string | null
+  currentPhaseId?: string | null
+  onPickCurrent?: (phaseId: string) => void
 }) {
   if (phases.length === 0 && !goal) return null
   return (
     <div className="rounded-lg border bg-muted/20 p-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Shape
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Shape
+        </p>
+        {onPickCurrent ? (
+          <p className="text-[10px] text-muted-foreground">
+            Click a phase to mark where you are
+          </p>
+        ) : null}
+      </div>
       {goal ? (
         <p className="mt-1 text-sm">
           <span className="text-muted-foreground">Goal:</span> {goal}
@@ -378,20 +438,41 @@ function ShapeCard({
       ) : null}
       {phases.length > 0 ? (
         <ol className="mt-2 space-y-1">
-          {phases.map((p) => (
-            <li key={p.id} className="flex items-start gap-2 text-sm">
-              <PhaseStatusIcon status={p.status} />
-              <span className="flex-1">
-                {p.title}
-                {p.description ? (
-                  <span className="ml-1 text-muted-foreground">
-                    — {p.description}
+          {phases.map((p) => {
+            const isCurrent = currentPhaseId === p.id
+            const Row = onPickCurrent ? 'button' : 'div'
+            return (
+              <li key={p.id}>
+                <Row
+                  type={onPickCurrent ? 'button' : undefined}
+                  onClick={
+                    onPickCurrent ? () => onPickCurrent(p.id) : undefined
+                  }
+                  className={cn(
+                    'flex w-full items-start gap-2 rounded-md px-1.5 py-1 text-left text-sm transition-colors',
+                    onPickCurrent && 'hover:bg-background',
+                    isCurrent && 'bg-background ring-1 ring-primary/40',
+                  )}
+                >
+                  <PhaseStatusIcon status={p.status} />
+                  <span className="flex-1">
+                    {p.title}
+                    {p.description ? (
+                      <span className="ml-1 text-muted-foreground">
+                        — {p.description}
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-              </span>
-              <PhaseCategoryPill category={p.category} />
-            </li>
-          ))}
+                  {isCurrent ? (
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      You're here
+                    </span>
+                  ) : null}
+                  <PhaseCategoryPill category={p.category} />
+                </Row>
+              </li>
+            )
+          })}
         </ol>
       ) : null}
     </div>
