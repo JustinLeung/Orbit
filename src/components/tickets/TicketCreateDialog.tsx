@@ -1,33 +1,21 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Dialog } from 'radix-ui'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { createTicket } from '@/lib/queries'
+import {
+  FormField,
+  ScaleSelect,
+  Select,
+  STATUS_OPTIONS,
+  TYPE_OPTIONS,
+  Textarea,
+  scaleOrNull,
+  trimOrNull,
+} from '@/components/tickets/form-helpers'
 import type { Ticket, TicketStatus, TicketType } from '@/types/orbit'
-
-const TYPE_OPTIONS: Array<{ value: TicketType; label: string }> = [
-  { value: 'task', label: 'Task' },
-  { value: 'research', label: 'Research' },
-  { value: 'decision', label: 'Decision' },
-  { value: 'waiting', label: 'Waiting' },
-  { value: 'follow_up', label: 'Follow-up' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'relationship', label: 'Relationship' },
-]
-
-const STATUS_OPTIONS: Array<{ value: TicketStatus; label: string }> = [
-  { value: 'inbox', label: 'Inbox' },
-  { value: 'active', label: 'Active' },
-  { value: 'waiting', label: 'Waiting' },
-  { value: 'follow_up', label: 'Follow-up' },
-  { value: 'review', label: 'Review' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'dropped', label: 'Dropped' },
-]
-
-const SCALE_OPTIONS = [1, 2, 3, 4, 5] as const
 
 type FormState = {
   title: string
@@ -55,17 +43,6 @@ const EMPTY: FormState = {
   importance: '',
   energy_required: '',
   context: '',
-}
-
-function trimOrNull(value: string): string | null {
-  const t = value.trim()
-  return t === '' ? null : t
-}
-
-function scaleOrNull(value: string): number | null {
-  if (value === '') return null
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
 }
 
 export function TicketCreateDialog({
@@ -285,69 +262,3 @@ export function TicketCreateDialog({
   )
 }
 
-function FormField({
-  label,
-  required,
-  children,
-}: {
-  label: string
-  required?: boolean
-  children: ReactNode
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-        {required ? (
-          <span className="ml-1 text-destructive" aria-hidden>
-            *
-          </span>
-        ) : null}
-      </span>
-      {children}
-    </label>
-  )
-}
-
-function Textarea(props: React.ComponentProps<'textarea'>) {
-  return (
-    <textarea
-      {...props}
-      className={cn(
-        'w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
-        props.className,
-      )}
-    />
-  )
-}
-
-function Select(props: React.ComponentProps<'select'>) {
-  return (
-    <select
-      {...props}
-      className={cn(
-        'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
-        props.className,
-      )}
-    />
-  )
-}
-
-function ScaleSelect({
-  value,
-  onChange,
-}: {
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">—</option>
-      {SCALE_OPTIONS.map((n) => (
-        <option key={n} value={String(n)}>
-          {n}
-        </option>
-      ))}
-    </Select>
-  )
-}

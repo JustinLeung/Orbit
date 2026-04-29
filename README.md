@@ -129,9 +129,14 @@ src/
   components/
     auth/            # RequireAuth route guard
     layout/          # AppLayout (sidebar) + PageHeader
-    ui/              # shadcn/ui primitives (button, ...)
+    tickets/         # TicketList, TicketDetailDialog (inline-edit),
+                     # TicketCreateDialog, QuickAddInput, EditableField,
+                     # form-helpers
+    ui/              # shadcn/ui primitives (button, input, ...)
   lib/
     auth.tsx         # AuthProvider + useAuth hook
+    createTicket.tsx # CreateTicketProvider + global "n" shortcut
+    queries.ts       # useTickets*/usePeople hooks + createTicket/updateTicket
     supabase.ts      # typed Supabase client
     utils.ts         # cn() + small helpers
   pages/             # one file per view: Inbox, Now, Waiting, Follow-Up, Review, Stuck, People, Login
@@ -281,7 +286,9 @@ keeps using `npm run seed` with its own custom data.
 
 - [x] Ticket creation form (quick-add on Inbox + full editor reachable from
   the sidebar or the `n` shortcut) — see ORB-6
-- [ ] Ticket detail view with history (`ticket_events`)
+- [x] Inline-edit ticket detail dialog (click-to-edit per field, optimistic
+  save, audit via `field_updated` event) — see ORB-7
+- [ ] Ticket detail view with history (`ticket_events` rendered in the dialog)
 - [ ] Status transitions + computed views (Now, Waiting, Stuck)
 - [ ] People CRUD + per-person ticket list
 - [ ] Edge Function: Assist mode → Gemini, writing into `agent_runs`

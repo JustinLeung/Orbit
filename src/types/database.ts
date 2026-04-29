@@ -304,10 +304,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      seed_onboarding_tickets: {
-        Args: Record<string, never>
-        Returns: number
-      }
+      seed_onboarding_tickets: { Args: never; Returns: number }
     }
     Enums: {
       agent_mode: "none" | "assist" | "semi_auto" | "auto"
@@ -324,6 +321,7 @@ export type Database = {
         | "participant_added"
         | "ticket_closed"
         | "ticket_dropped"
+        | "field_updated"
       ticket_relation_type: "relates_to" | "blocked_by"
       ticket_status:
         | "inbox"
@@ -485,6 +483,7 @@ export const Constants = {
         "participant_added",
         "ticket_closed",
         "ticket_dropped",
+        "field_updated",
       ],
       ticket_relation_type: ["relates_to", "blocked_by"],
       ticket_status: [

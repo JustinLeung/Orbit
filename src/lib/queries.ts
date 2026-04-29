@@ -3,8 +3,10 @@ import { supabase } from '@/lib/supabase'
 import type {
   Person,
   Ticket,
+  TicketEventInsert,
   TicketInsert,
   TicketStatus,
+  TicketUpdate,
 } from '@/types/orbit'
 
 type State<T> = {
@@ -182,6 +184,55 @@ export async function createTicket(
   })
   if (eventErr) {
     console.error('ticket_created event insert failed', eventErr)
+  }
+
+  notifyTicketsChanged()
+  return ticket
+}
+
+export type FieldChangeValue = string | number | null
+export type FieldChange = {
+  field: string
+  old: FieldChangeValue
+  new: FieldChangeValue
+}
+
+// updateTicket persists `patch` and writes one ticket_events row per
+// changed field. Caller passes `changedFields` (it knows the prior values).
+// Same non-transactional convention as createTicket — event insert failures
+// are logged but don't fail the update.
+export async function updateTicket(
+  id: string,
+  patch: TicketUpdate,
+  options?: { changedFields?: FieldChange[] },
+): Promise<Ticket> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { data: ticket, error } = await supabase
+    .from('tickets')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+
+  const changes = options?.changedFields ?? []
+  if (changes.length > 0) {
+    const events: TicketEventInsert[] = changes.map((c) => ({
+      user_id: userId,
+      ticket_id: ticket.id,
+      event_type: c.field === 'next_action' ? 'next_action_updated' : 'field_updated',
+      payload: { field: c.field, old: c.old, new: c.new },
+    }))
+    const { error: eventErr } = await supabase
+      .from('ticket_events')
+      .insert(events)
+    if (eventErr) {
+      console.error('ticket field-update event insert failed', eventErr)
+    }
   }
 
   notifyTicketsChanged()

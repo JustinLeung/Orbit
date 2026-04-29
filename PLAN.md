@@ -126,6 +126,7 @@ Event types:
 - `agent_output_created`
 - `user_feedback_given`
 - `next_action_updated`
+- `field_updated` — generic per-field edit; payload `{field, old, new}`
 - `artifact_created`
 - `participant_added`
 - `ticket_closed`
