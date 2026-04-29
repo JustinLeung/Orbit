@@ -12,6 +12,7 @@ export function FollowUpPage() {
         loading={loading}
         error={error}
         empty="No follow-ups queued."
+        groupBy="none"
       />
     </>
   )

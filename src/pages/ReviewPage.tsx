@@ -15,6 +15,7 @@ export function ReviewPage() {
         loading={loading}
         error={error}
         empty="No agent runs to review."
+        groupBy="none"
       />
     </>
   )

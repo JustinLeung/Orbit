@@ -15,6 +15,7 @@ export function NowPage() {
         loading={loading}
         error={error}
         empty="Nothing is on your plate right now."
+        groupBy="none"
       />
     </>
   )

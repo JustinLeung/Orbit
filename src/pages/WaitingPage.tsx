@@ -12,6 +12,7 @@ export function WaitingPage() {
         loading={loading}
         error={error}
         empty="Nothing waiting."
+        groupBy="none"
       />
     </>
   )
