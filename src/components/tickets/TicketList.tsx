@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
-import { STATUS_OPTIONS } from '@/components/tickets/form-helpers'
+import { STATUS_OPTIONS } from '@/components/tickets/form-constants'
 import { updateTicket } from '@/lib/queries'
 import type { Ticket, TicketStatus, TicketType } from '@/types/orbit'
 

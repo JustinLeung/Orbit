@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '@/lib/auth'
+import { useAuth } from '@/lib/useAuth'
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()

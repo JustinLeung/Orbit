@@ -137,11 +137,17 @@ src/
                      # TicketContextSections (DoD checklist, open questions,
                      #   references — mounted in TicketDetailDialog),
                      # TicketCreateDialog (manual fallback),
-                     # QuickAddInput, EditableField, form-helpers
+                     # QuickAddInput, EditableField,
+                     # form-helpers (FormField/Textarea/Select/ScaleSelect),
+                     # form-constants (TYPE/STATUS/AGENT_MODE_OPTIONS,
+                     #   trimOrNull, scaleOrNull)
     ui/              # shadcn/ui primitives (button, input, ...)
   lib/
-    auth.tsx         # AuthProvider + useAuth hook
+    auth.tsx         # AuthProvider component
+    useAuth.ts       # AuthContext + useAuth hook (sibling to auth.tsx so
+                     # the provider file only exports a component)
     createTicket.tsx # CreateTicketProvider + global "n" shortcut
+    useCreateTicket.ts # CreateTicketContext + useCreateTicket hook
     queries.ts       # useTickets*/usePeople hooks + createTicket/updateTicket
     supabase.ts      # typed Supabase client
     utils.ts         # cn() + small helpers

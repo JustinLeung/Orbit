@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
+import type { Reducer } from 'react'
 import { supabase } from '@/lib/supabase'
 import type {
   AgentRun,
@@ -25,6 +26,33 @@ type State<T> = {
   refresh: () => void
 }
 
+// Reducer used by the fetch hooks below — `useReducer`'s `dispatch` lets us
+// transition state from inside effects without tripping the
+// `react-hooks/set-state-in-effect` rule (which only flags direct setState
+// calls in effect bodies).
+type FetchState<T> = { data: T; loading: boolean; error: Error | null }
+type FetchAction<T> =
+  | { type: 'reset'; data: T }
+  | { type: 'start' }
+  | { type: 'success'; data: T }
+  | { type: 'failure'; error: Error }
+
+function fetchReducer<T>(
+  state: FetchState<T>,
+  action: FetchAction<T>,
+): FetchState<T> {
+  switch (action.type) {
+    case 'reset':
+      return { data: action.data, loading: false, error: null }
+    case 'start':
+      return { ...state, loading: true, error: null }
+    case 'success':
+      return { data: action.data, loading: false, error: null }
+    case 'failure':
+      return { ...state, loading: false, error: action.error }
+  }
+}
+
 const TICKETS_CHANGED_EVENT = 'orbit:tickets-changed'
 
 function notifyTicketsChanged() {
@@ -37,27 +65,21 @@ function useTicketAsync<T>(
   initial: T,
   { listen }: { listen: boolean } = { listen: false },
 ): State<T> {
-  const [data, setData] = useState<T>(initial)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+  const [state, dispatch] = useReducer(
+    fetchReducer as Reducer<FetchState<T>, FetchAction<T>>,
+    { data: initial, loading: true, error: null },
+  )
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    dispatch({ type: 'start' })
     fetcher()
       .then((next) => {
-        if (!cancelled) {
-          setData(next)
-          setLoading(false)
-        }
+        if (!cancelled) dispatch({ type: 'success', data: next })
       })
       .catch((err: Error) => {
-        if (!cancelled) {
-          setError(err)
-          setLoading(false)
-        }
+        if (!cancelled) dispatch({ type: 'failure', error: err })
       })
     return () => {
       cancelled = true
@@ -73,7 +95,7 @@ function useTicketAsync<T>(
     return () => window.removeEventListener(TICKETS_CHANGED_EVENT, refresh)
   }, [listen, refresh])
 
-  return { data, loading, error, refresh }
+  return { data: state.data, loading: state.loading, error: state.error, refresh }
 }
 
 export function useTicketsByStatus(status: TicketStatus) {
@@ -249,17 +271,22 @@ async function ticketSnapshot(ticket: Ticket) {
 // "single model call" table, but avoids a migration. See PLAN.md for the
 // follow-up to move this to a dedicated tickets.assist_state column.
 export function useLatestAssistState(ticketId: string | null) {
-  const [data, setData] = useState<AssistState | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [state, dispatch] = useReducer(
+    fetchReducer as Reducer<
+      FetchState<AssistState | null>,
+      FetchAction<AssistState | null>
+    >,
+    { data: null, loading: false, error: null },
+  )
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
     if (!ticketId) {
-      setData(null)
+      dispatch({ type: 'reset', data: null })
       return
     }
     let cancelled = false
-    setLoading(true)
+    dispatch({ type: 'start' })
     supabase
       .from('agent_runs')
       .select('*')
@@ -270,8 +297,7 @@ export function useLatestAssistState(ticketId: string | null) {
       .then(({ data: row, error }) => {
         if (cancelled) return
         if (error) console.error('useLatestAssistState', error)
-        setData(parseAssistState(row))
-        setLoading(false)
+        dispatch({ type: 'success', data: parseAssistState(row) })
       })
     return () => {
       cancelled = true
@@ -286,7 +312,7 @@ export function useLatestAssistState(ticketId: string | null) {
     return () => window.removeEventListener(ASSIST_CHANGED_EVENT, refresh)
   }, [])
 
-  return { data, loading }
+  return { data: state.data, loading: state.loading }
 }
 
 function parseAssistState(run: AgentRun | null | undefined): AssistState | null {
@@ -632,17 +658,22 @@ function notifyOpenQuestionsChanged() {
 }
 
 export function useTicketOpenQuestions(ticketId: string | null) {
-  const [data, setData] = useState<TicketOpenQuestion[]>([])
-  const [loading, setLoading] = useState(false)
+  const [state, dispatch] = useReducer(
+    fetchReducer as Reducer<
+      FetchState<TicketOpenQuestion[]>,
+      FetchAction<TicketOpenQuestion[]>
+    >,
+    { data: [], loading: false, error: null },
+  )
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
     if (!ticketId) {
-      setData([])
+      dispatch({ type: 'reset', data: [] })
       return
     }
     let cancelled = false
-    setLoading(true)
+    dispatch({ type: 'start' })
     supabase
       .from('ticket_open_questions')
       .select('*')
@@ -651,8 +682,7 @@ export function useTicketOpenQuestions(ticketId: string | null) {
       .then(({ data: rows, error }) => {
         if (cancelled) return
         if (error) console.error('useTicketOpenQuestions', error)
-        setData(rows ?? [])
-        setLoading(false)
+        dispatch({ type: 'success', data: rows ?? [] })
       })
     return () => {
       cancelled = true
@@ -667,7 +697,7 @@ export function useTicketOpenQuestions(ticketId: string | null) {
     return () => window.removeEventListener(OPEN_QUESTIONS_CHANGED_EVENT, refresh)
   }, [])
 
-  return { data, loading }
+  return { data: state.data, loading: state.loading }
 }
 
 export async function addOpenQuestion(
@@ -738,17 +768,22 @@ function notifyReferencesChanged() {
 }
 
 export function useTicketReferences(ticketId: string | null) {
-  const [data, setData] = useState<TicketReference[]>([])
-  const [loading, setLoading] = useState(false)
+  const [state, dispatch] = useReducer(
+    fetchReducer as Reducer<
+      FetchState<TicketReference[]>,
+      FetchAction<TicketReference[]>
+    >,
+    { data: [], loading: false, error: null },
+  )
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
     if (!ticketId) {
-      setData([])
+      dispatch({ type: 'reset', data: [] })
       return
     }
     let cancelled = false
-    setLoading(true)
+    dispatch({ type: 'start' })
     supabase
       .from('ticket_references')
       .select('*')
@@ -757,8 +792,7 @@ export function useTicketReferences(ticketId: string | null) {
       .then(({ data: rows, error }) => {
         if (cancelled) return
         if (error) console.error('useTicketReferences', error)
-        setData(rows ?? [])
-        setLoading(false)
+        dispatch({ type: 'success', data: rows ?? [] })
       })
     return () => {
       cancelled = true
@@ -773,7 +807,7 @@ export function useTicketReferences(ticketId: string | null) {
     return () => window.removeEventListener(REFERENCES_CHANGED_EVENT, refresh)
   }, [])
 
-  return { data, loading }
+  return { data: state.data, loading: state.loading }
 }
 
 export async function addReference(

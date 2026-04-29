@@ -15,10 +15,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      # Lint is currently failing on pre-existing issues (see ORB-20). Run it
-      # for visibility but don't block merges until the backlog is cleared.
       - run: npm run lint
-        continue-on-error: true
       - run: npx tsc -b
       - run: npx tsc -p server/tsconfig.json --noEmit
       - run: npm test
