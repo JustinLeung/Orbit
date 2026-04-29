@@ -271,13 +271,53 @@ async function ticketSnapshot(ticket: Ticket) {
 // each turn appends a new row, latest = current. Semantically a stretch on a
 // "single model call" table, but avoids a migration. See PLAN.md for the
 // follow-up to move this to a dedicated tickets.assist_state column.
+//
+// Module-level cache keyed by ticketId. Two purposes:
+//   - Avoid the "Mapping out the shape…" placeholder flashing when the
+//     assist panel re-mounts (StrictMode, dialog re-opens, ticket switches
+//     and back). With a hit we hydrate synchronously and only refetch in
+//     the background.
+//   - Ensure the bootstrap walkthrough turn fires at most once per
+//     (page load × ticketId). Otherwise StrictMode's intentional
+//     mount/unmount/remount triggers a duplicate /api/assist/walkthrough
+//     call on first ticket open, which the user sees as the assist
+//     section thrashing.
+type AssistCacheEntry = { state: AssistState | null; loaded: boolean }
+const assistStateCache = new Map<string, AssistCacheEntry>()
+const assistBootstrappedTickets = new Set<string>()
+
+export function getCachedAssistState(
+  ticketId: string,
+): AssistCacheEntry | null {
+  return assistStateCache.get(ticketId) ?? null
+}
+
+export function markAssistBootstrapped(ticketId: string): boolean {
+  if (assistBootstrappedTickets.has(ticketId)) return false
+  assistBootstrappedTickets.add(ticketId)
+  return true
+}
+
+function setCachedAssistState(ticketId: string, state: AssistState | null) {
+  assistStateCache.set(ticketId, { state, loaded: true })
+}
+
 export function useLatestAssistState(ticketId: string | null) {
+  const cached = ticketId ? assistStateCache.get(ticketId) : null
   const [state, dispatch] = useReducer(
     fetchReducer as Reducer<
       FetchState<AssistState | null>,
       FetchAction<AssistState | null>
     >,
-    { data: null, loading: false, error: null },
+    {
+      data: cached?.state ?? null,
+      // If we already have a cached value (even null after a confirmed
+      // empty fetch), skip the loading state — the value we have is good
+      // enough to render against. The background refetch below keeps it
+      // honest without flicker.
+      loading: !cached?.loaded,
+      error: null,
+    },
   )
   const [version, setVersion] = useState(0)
 
@@ -286,8 +326,15 @@ export function useLatestAssistState(ticketId: string | null) {
       dispatch({ type: 'reset', data: null })
       return
     }
+    const hit = assistStateCache.get(ticketId)
+    if (hit?.loaded) {
+      // Hydrate synchronously, then refresh quietly. No "loading=true"
+      // dispatch — it would just flash the placeholder.
+      dispatch({ type: 'success', data: hit.state })
+    } else {
+      dispatch({ type: 'start' })
+    }
     let cancelled = false
-    dispatch({ type: 'start' })
     supabase
       .from('agent_runs')
       .select('*')
@@ -297,8 +344,13 @@ export function useLatestAssistState(ticketId: string | null) {
       .maybeSingle()
       .then(({ data: row, error }) => {
         if (cancelled) return
-        if (error) console.error('useLatestAssistState', error)
-        dispatch({ type: 'success', data: parseAssistState(row) })
+        if (error) {
+          console.error('useLatestAssistState', error)
+          return
+        }
+        const next = parseAssistState(row)
+        setCachedAssistState(ticketId, next)
+        dispatch({ type: 'success', data: next })
       })
     return () => {
       cancelled = true
@@ -520,6 +572,10 @@ export async function runAssistTurn(args: {
   })
   if (evtErr) console.error('agent_ran event insert failed', evtErr)
 
+  // Update the cache eagerly so subscribed hooks (and any panel that
+  // re-mounts immediately afterwards) see the new state without waiting
+  // for the agent_runs SELECT round-trip.
+  setCachedAssistState(ticket.id, nextState)
   notifyAssistChanged()
   return {
     state: nextState,
@@ -560,6 +616,7 @@ export async function persistAssistState(
   })
   if (evtErr) console.error('agent_ran event insert failed', evtErr)
 
+  setCachedAssistState(ticket.id, state)
   notifyAssistChanged()
 }
 
