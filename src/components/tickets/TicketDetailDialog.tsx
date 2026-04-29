@@ -2,18 +2,31 @@ import { useState } from 'react'
 import { Dialog } from 'radix-ui'
 import {
   CalendarClock,
+  CheckCircle2,
+  Circle,
+  CircleDashed,
   Clock,
   CornerDownLeft,
   Flag,
   History,
+  ListChecks,
   PanelRightClose,
   PanelRightOpen,
   Sparkles,
+  XCircle,
   X,
+  type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
-import { updateTicket, type FieldChangeValue } from '@/lib/queries'
+import {
+  buildPickedPhaseState,
+  persistAssistState,
+  updateTicket,
+  useLatestAssistState,
+  type FieldChangeValue,
+} from '@/lib/queries'
+import type { ShapePhaseStatus } from '@/lib/assistTypes'
 import { EditableField } from '@/components/tickets/EditableField'
 import { TicketAssistPanel } from '@/components/tickets/TicketAssistPanel'
 import { TicketContextSections } from '@/components/tickets/TicketContextSections'
@@ -699,6 +712,7 @@ function PropertiesSidebar({
         <div className="border-t pt-4">
           <SectionLabel>Assist</SectionLabel>
           <div className="mt-1 space-y-0.5">
+            <PhasePill ticket={ticket} />
             <PropertyPill
               icon={AgentIcon}
               iconClass={agentMeta.tone}
@@ -744,6 +758,68 @@ function PropertiesSidebar({
       </div>
     </aside>
   )
+}
+
+// Phase picker for the assist walkthrough — lives in the sidebar so the
+// user can switch phases without scrolling to the assist panel. Reads
+// the latest assist state independently and writes via persistAssistState
+// (the panel's hook listens to the same change event and refreshes).
+function PhasePill({ ticket }: { ticket: Ticket }) {
+  const { data: assistState } = useLatestAssistState(ticket.id)
+  const phases = assistState?.shape?.phases ?? []
+  const currentId = assistState?.position?.current_phase_id ?? null
+  const current = phases.find((p) => p.id === currentId) ?? null
+
+  const options: PropertyMenuOption<string>[] = phases.map((p) => ({
+    value: p.id,
+    label: p.title,
+    icon: PHASE_STATUS_ICON[p.status],
+    iconClass:
+      p.status === 'done' || p.status === 'in_progress'
+        ? 'text-primary'
+        : p.status === 'blocked'
+          ? 'text-destructive'
+          : 'text-muted-foreground',
+  }))
+
+  const trigger = (
+    <PropertyPill
+      icon={ListChecks}
+      iconClass="text-muted-foreground"
+      label="Phase"
+      value={current?.title}
+      placeholder={phases.length > 0 ? 'Pick a phase' : '—'}
+      disabled={phases.length === 0}
+      menu={
+        phases.length > 0 ? (
+          <PropertyMenu
+            options={options}
+            value={currentId}
+            onSelect={(next) => {
+              if (!assistState || next === currentId) return
+              const nextState = buildPickedPhaseState(assistState, next)
+              if (!nextState) return
+              void persistAssistState(
+                ticket,
+                nextState,
+                'pick_current_phase',
+              ).catch((err) =>
+                console.error('pick current phase failed', err),
+              )
+            }}
+          />
+        ) : undefined
+      }
+    />
+  )
+  return trigger
+}
+
+const PHASE_STATUS_ICON: Record<ShapePhaseStatus, LucideIcon> = {
+  done: CheckCircle2,
+  in_progress: CircleDashed,
+  blocked: XCircle,
+  not_started: Circle,
 }
 
 function Stamp({ label, value }: { label: string; value: string | null }) {
