@@ -2,7 +2,12 @@
 // They're duplicated rather than shared because client + server have
 // separate tsconfigs and cross-tree imports are messy.
 
-export type AssistPhase = 'shape' | 'position' | 'next_steps' | 'done'
+// shape: AI generates the arc — phases each carry one concrete `action`.
+// refine: user has picked their current phase and given context (typically
+//   via structured questions). The model updates THAT phase's action in
+//   place. Other phases remain stable unless something obvious has changed.
+// done: wrap-up; client just stops asking.
+export type AssistPhase = 'shape' | 'refine' | 'done'
 
 export type PhaseCategory =
   | 'planning'
@@ -39,6 +44,11 @@ export type ShapePhaseEntry = {
   description: string | null
   status: ShapePhaseStatus
   category: PhaseCategory
+  // The single concrete imperative the user can do for this phase, e.g.
+  // "Email three venues for availability". Phases ARE the action plan.
+  action: string | null
+  // Optional clarification of the action ("Ask for May 18, capacity 80").
+  action_details: string | null
 }
 
 export type Shape = {
@@ -54,17 +64,9 @@ export type Position = {
   notes: string | null
 }
 
-export type NextStep = {
-  kind: 'next_step' | 'research'
-  title: string
-  details: string | null
-  category: PhaseCategory
-}
-
 export type AssistState = {
   phase: AssistPhase
   shape: Shape | null
   position: Position | null
-  next_steps: NextStep[] | null
   messages: AssistMessage[]
 }

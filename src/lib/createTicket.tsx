@@ -5,39 +5,30 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import {
-  TicketCreateDialog,
-  type TicketCreatePrefill,
-} from '@/components/tickets/TicketCreateDialog'
-import { TicketCreateChat } from '@/components/tickets/TicketCreateChat'
+import { TicketCreateInline } from '@/components/tickets/TicketCreateInline'
+import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
 import { CreateTicketContext } from '@/lib/useCreateTicket'
-import type { TicketStatus } from '@/types/orbit'
+import type { Ticket, TicketStatus } from '@/types/orbit'
 
-type Mode = 'closed' | 'chat' | 'manual'
-
+// Capture flow: title-only modal → on submit, ticket gets created and the
+// detail dialog opens for it (where the assist panel takes over). The
+// previous "manual full form" path has been retired in favor of editing
+// fields inline inside the detail dialog.
 export function CreateTicketProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<Mode>('closed')
+  const [captureOpen, setCaptureOpen] = useState(false)
   const [defaultStatus, setDefaultStatus] = useState<TicketStatus | undefined>(
     undefined,
   )
-  const [manualPrefill, setManualPrefill] = useState<
-    TicketCreatePrefill | undefined
-  >(undefined)
+  const [openedTicket, setOpenedTicket] = useState<Ticket | null>(null)
 
   const openCreate = useCallback((status?: TicketStatus) => {
     setDefaultStatus(status)
-    setManualPrefill(undefined)
-    setMode('chat')
+    setCaptureOpen(true)
   }, [])
 
-  const switchToManual = useCallback((prefill?: TicketCreatePrefill) => {
-    setManualPrefill(prefill)
-    setMode('manual')
-  }, [])
-
-  const closeAll = useCallback(() => {
-    setMode('closed')
-    setManualPrefill(undefined)
+  const handleCreated = useCallback((ticket: Ticket) => {
+    setCaptureOpen(false)
+    setOpenedTicket(ticket)
   }, [])
 
   // Global "n" shortcut to start ticket capture — ignored while typing.
@@ -67,21 +58,18 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
   return (
     <CreateTicketContext.Provider value={value}>
       {children}
-      <TicketCreateChat
-        open={mode === 'chat'}
-        onOpenChange={(open) => {
-          if (!open) closeAll()
-        }}
-        onSwitchToManual={switchToManual}
+      <TicketCreateInline
+        open={captureOpen}
+        onOpenChange={setCaptureOpen}
+        onCreated={handleCreated}
         defaultStatus={defaultStatus}
       />
-      <TicketCreateDialog
-        open={mode === 'manual'}
+      <TicketDetailDialog
+        ticket={openedTicket}
+        open={openedTicket !== null}
         onOpenChange={(open) => {
-          if (!open) closeAll()
+          if (!open) setOpenedTicket(null)
         }}
-        defaultStatus={defaultStatus}
-        prefill={manualPrefill}
       />
     </CreateTicketContext.Provider>
   )

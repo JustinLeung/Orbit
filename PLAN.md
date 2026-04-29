@@ -18,7 +18,7 @@ Tagline: Keep every open loop in motion.
 - Node + Express server (serves the Vite build and `/api/*` routes)
 - Supabase (local CLI for dev, hosted later) — ports remapped to 544xx (see supabase/config.toml)
 - Auth: Email OTP (6-digit code, via Supabase Auth)
-- AI: Gemini (Assist mode only for MVP, called from the Express server — `/api/assist/walkthrough` powers the phased capture+assist flow: Shape → Position → Next steps)
+- AI: Gemini (Assist mode only for MVP, called from the Express server — `/api/assist/walkthrough` powers the structured assist flow embedded inside each ticket: AI proposes a Shape where each phase carries its own concrete action; the user clicks the phase they're in and category-specific structured questions refine that phase's action in place. Phases ARE the action plan — there is no separate next-steps list.)
 - Email: Resend, called from the Express server (`/api/send-email`)
 - Hosting: Render (Web Service, Node runtime)
 
@@ -243,7 +243,7 @@ For MVP: `none`, `assist`.
 
 ### Assist Mode Can
 
-- walk the user through a phased assist flow on every ticket — Shape (the whole arc), Position (where you are, what's blocked), Next steps (concrete actions). Conversation and state persist in `agent_runs` so the user can leave at any time and resume. Shipped — `/api/assist/walkthrough`. Follow-up: move the persisted state to a dedicated `tickets.assist_state` JSONB column instead of the latest `agent_runs` row.
+- walk the user through a structured assist flow on every ticket — the AI proposes a Shape (3–5 phases, each carrying its own concrete `action`), the user clicks the phase they're in, then a small set of category-specific structured questions refine that phase's action in place so it reflects the user's current situation. "Set as next action" on any phase row promotes its action to `ticket.next_action`. Free-form chat is available but demoted to an "Ask a follow-up" affordance. State persists in `agent_runs` so the user can leave at any time and resume from the assist panel embedded in the ticket detail dialog. Shipped — `/api/assist/walkthrough`. Follow-up: move the persisted state to a dedicated `tickets.assist_state` JSONB column instead of the latest `agent_runs` row.
 - capture structured context the user mentions — write a `definition_of_done` checklist, append unresolved questions to `ticket_open_questions`, and pin source material to `ticket_references` (link / snippet / attachment / email).
 - summarize ticket
 - suggest next action

@@ -11,15 +11,26 @@ const router = Router()
 
 const SYSTEM_INSTRUCTION = `You are Orbit's personal assistant, helping the user think through an "open loop" (a task, follow-up, decision, research item, or relationship to tend to).
 
-You walk them through three phases, ONE AT A TIME, in order:
+The walkthrough has TWO active phases the user moves between:
 
-1. **shape** — Help them see the whole arc. Propose a structured shape: a goal, 3-5 phases this naturally has, completion criteria ("how will you know you're done?"), and inputs needed (people, info, decisions). Tag each phase with a "category" — see "Phase categories" below. Refine via conversation. Confirm "want to look at where you are on this?" when the shape feels right.
+1. **shape** — Look at the ticket and propose the WHOLE arc as a structured shape. The shape has:
+    * goal — one sentence on what done looks like
+    * phases — 3-5 phases this naturally has, in order. Each phase is BOTH the arc-segment AND a concrete unit of work, so each phase carries exactly one \`action\` (a single imperative the user can do, e.g. "Email three venues for availability"). Phases ARE the action plan — there is no separate next-steps list.
+    * completion_criteria — concrete signals the loop is done
+    * inputs_needed — people, info, decisions required
 
-2. **position** — Now that the shape exists, ask where they are. What's done, what's in progress, what's blocked, what hasn't started. Update each shape phase's status. Identify blockers explicitly. Confirm "want to figure out next steps?" when you have a clear picture.
+2. **refine** — The user has clicked the phase they're in and given you context (typically as labelled answers to a few structured questions about that phase). Update THAT phase's \`action\` (and \`action_details\` if useful) so it reflects the user's current situation more concretely than the original generic action. You can also update its \`status\`, blockers, and notes. KEEP THE REST OF THE SHAPE STABLE unless something obvious has changed (e.g. user revealed an extra phase you missed).
 
-3. **next_steps** — Produce 3-5 concrete next actions targeted at the gaps and blockers. Mix "next_step" (do this) and "research" (find this out). Each title is one short imperative phrase. Tag each next_step with a "category". After the user has applied or noted the steps, suggest finishing.
+A phase has:
+- id — stable string id
+- title — short noun phrase for the arc-segment
+- description — optional one-liner about the segment
+- category — see below
+- status — not_started | in_progress | done | blocked
+- action — REQUIRED. One concrete imperative the user can do for this phase. Always populate. After refine, this is what the user will likely set as their next_action.
+- action_details — optional clarification ("Ask for May 18, capacity 80")
 
-Phase categories (apply to BOTH shape phases and next_steps):
+Phase categories (apply to phases AND inform tone):
 - "planning" — clarifying scope, breaking work down, mapping options before committing.
 - "research" — gathering info before you can act ("find out X").
 - "doing" — actively producing the thing (drafting, building, sending).
@@ -27,26 +38,52 @@ Phase categories (apply to BOTH shape phases and next_steps):
 - "deciding" — choosing between options, making a call.
 - "closing" — final review, confirmation, wrap-up.
 
-Pick the category that best matches the *primary* nature of the work. If a step is "send Sam an email and wait for reply", split it into two — a "doing" send and a "waiting" reply — when sensible. Otherwise tag by the more substantive half.
+Pick the category that best matches the *primary* nature of that phase's work.
 
 Cross-cutting:
 - Conversational and warm. Reflect what you heard. Don't pile up questions.
-- Stay in the user's current phase. Do NOT jump ahead. The user clicks "Continue" to advance.
-- When you think the current phase is complete, set "ready_to_advance": true. The client may still keep going if the user wants to refine.
 - "assistant_message" is what gets shown to the user this turn. Always present, always in your warm voice.
-- Update only the field for your current phase: shape during 'shape', position during 'position', next_steps during 'next_steps'. Other fields can be omitted (will be carried over).
+- During shape: produce the whole shape. During refine: return an updated \`shape\` (the same phases with the current phase's action improved) AND an updated \`position\` if blockers/notes changed.
+- When you think the current phase is complete, set "ready_to_advance": true. This tells the client the loop can be marked done.
 - "ticket_updates" — Actively capture concrete facts the user shares (dates, venues, names, links, decisions, deadlines, dress codes, etc.) into the right ticket fields each turn. Whenever the conversation gives you a confident value, include it. Be SURGICAL: only set a field when the value is genuinely better than what's on the ticket. NEVER overwrite the title. NEVER invent facts. Field guidance:
     * goal — set during shape phase if you've articulated a clear goal
     * description — 1-2 sentence summary of what this loop is about; refresh whenever there's meaningfully new info
-    * next_action — set during next_steps phase to the suggestion you'd recommend first (must match one of your next_steps titles)
+    * next_action — during refine, set to the current phase's refined \`action\` so the ticket reflects what the user should do next. Must match a phase's \`action\` text exactly.
     * next_action_at — ONLY if the user has explicitly stated a date or time (e.g. "the wedding is May 18", "Sam needs it by Friday"). Never guess. Output as ISO 8601 (with timezone if known, otherwise local-naive is fine, e.g. "2026-05-18T16:00").
     * type — only if the loop is clearly 'research', 'decision', 'follow_up', 'admin', or 'relationship' rather than the default 'task'
     * context — append-style: capture concrete details the user mentions that aren't a goal/description but matter (venue, dress code, address, links, key constraints). Preserve existing context when adding to it.
-    * definition_of_done — full-list replace. Concrete completion criteria as { item, done } pairs (e.g. {item: "countersigned PDF in Drive", done: false}). Best populated during shape phase when you articulate completion_criteria. If the user mentions something is already done, set done: true. Only output when you can write a meaningfully better list than what's currently there; otherwise omit. Preserve existing items the user has marked done.
+    * definition_of_done — full-list replace. Concrete completion criteria as { item, done } pairs. Best populated during shape phase when you articulate completion_criteria. If the user mentions something is already done, set done: true. Only output when you can write a meaningfully better list than what's currently there; otherwise omit.
     * open_questions_to_add — APPEND-ONLY list of strings. Use this when you ask a clarifying question or surface an unknown the user can't immediately answer. Phrase as a question. Don't re-add questions already in the ticket's open_questions (they're shown to you).
-    * references_to_add — APPEND-ONLY list of typed pointers to source material the user mentions (URLs, document titles, email subjects, file names). Each entry is { kind, url_or_text, label?: string }. kind ∈ 'link' | 'snippet' | 'attachment' | 'email' | 'other'. Use 'link' for URLs the user pastes; 'snippet' for short text excerpts; 'email' for "the email from Sam"; 'attachment' for "the PDF"; 'other' otherwise. Don't re-add references already shown to you.
+    * references_to_add — APPEND-ONLY list of typed pointers to source material the user mentions (URLs, document titles, email subjects, file names). Each entry is { kind, url_or_text, label?: string }. kind ∈ 'link' | 'snippet' | 'attachment' | 'email' | 'other'. Don't re-add references already shown to you.
 - NEVER invent names, dates, or facts. Use the user's own words where possible.
 - Today's date is provided in the prompt for relative-date interpretation.`
+
+const phaseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    id: { type: Type.STRING },
+    title: { type: Type.STRING },
+    description: { type: Type.STRING, nullable: true },
+    status: {
+      type: Type.STRING,
+      enum: ['not_started', 'in_progress', 'done', 'blocked'],
+    },
+    category: {
+      type: Type.STRING,
+      enum: [
+        'planning',
+        'research',
+        'doing',
+        'waiting',
+        'deciding',
+        'closing',
+      ],
+    },
+    action: { type: Type.STRING },
+    action_details: { type: Type.STRING, nullable: true },
+  },
+  required: ['id', 'title', 'status', 'category', 'action'],
+}
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -58,33 +95,7 @@ const responseSchema = {
       nullable: true,
       properties: {
         goal: { type: Type.STRING, nullable: true },
-        phases: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.STRING },
-              title: { type: Type.STRING },
-              description: { type: Type.STRING, nullable: true },
-              status: {
-                type: Type.STRING,
-                enum: ['not_started', 'in_progress', 'done', 'blocked'],
-              },
-              category: {
-                type: Type.STRING,
-                enum: [
-                  'planning',
-                  'research',
-                  'doing',
-                  'waiting',
-                  'deciding',
-                  'closing',
-                ],
-              },
-            },
-            required: ['id', 'title', 'status', 'category'],
-          },
-        },
+        phases: { type: Type.ARRAY, items: phaseSchema },
         completion_criteria: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
@@ -105,30 +116,6 @@ const responseSchema = {
         notes: { type: Type.STRING, nullable: true },
       },
       required: ['blockers'],
-    },
-    next_steps: {
-      type: Type.ARRAY,
-      nullable: true,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          kind: { type: Type.STRING, enum: ['next_step', 'research'] },
-          title: { type: Type.STRING },
-          details: { type: Type.STRING, nullable: true },
-          category: {
-            type: Type.STRING,
-            enum: [
-              'planning',
-              'research',
-              'doing',
-              'waiting',
-              'deciding',
-              'closing',
-            ],
-          },
-        },
-        required: ['kind', 'title', 'category'],
-      },
     },
     ticket_updates: {
       type: Type.OBJECT,
@@ -235,7 +222,6 @@ type ModelResponse = {
   ready_to_advance?: boolean | null
   shape?: AssistState['shape']
   position?: AssistState['position']
-  next_steps?: AssistState['next_steps']
   ticket_updates?: TicketUpdates | null
 }
 
@@ -246,7 +232,7 @@ type WalkthroughBody = {
   advance?: boolean
 }
 
-const PHASE_ORDER: AssistPhase[] = ['shape', 'position', 'next_steps', 'done']
+const PHASE_ORDER: AssistPhase[] = ['shape', 'refine', 'done']
 
 function nextPhase(p: AssistPhase): AssistPhase {
   const i = PHASE_ORDER.indexOf(p)
@@ -356,7 +342,6 @@ function emptyState(): AssistState {
     phase: 'shape',
     shape: null,
     position: null,
-    next_steps: null,
     messages: [],
   }
 }
@@ -416,13 +401,6 @@ function buildPrompt(
   if (state.position) {
     lines.push('', 'Current position:', JSON.stringify(state.position, null, 2))
   }
-  if (state.next_steps) {
-    lines.push(
-      '',
-      'Current next_steps:',
-      JSON.stringify(state.next_steps, null, 2),
-    )
-  }
   if (state.messages.length > 0) {
     lines.push('', 'Conversation so far:')
     for (const m of state.messages) {
@@ -432,7 +410,10 @@ function buildPrompt(
   if (userMessage) {
     lines.push('', `New user message: ${userMessage}`)
   } else if (state.messages.length === 0 && !advanced) {
-    lines.push('', 'No user message yet — propose an initial shape from the ticket alone.')
+    lines.push(
+      '',
+      'No user message yet — propose an initial shape from the ticket alone, with each phase carrying a sensible default action.',
+    )
   }
   return lines.join('\n')
 }
@@ -537,21 +518,15 @@ router.post('/', async (req, res) => {
       return res.status(502).json({ error: 'Missing assistant_message' })
     }
 
+    // Both shape and refine return an updated `shape`. In refine, the model
+    // is editing the current phase's action in place; in shape, it's the
+    // initial generation. Either way, take what the model returned if
+    // present, otherwise carry forward.
     const phase = activeState.phase
     const nextState: AssistState = {
       phase,
-      shape:
-        phase === 'shape' && parsed.shape
-          ? parsed.shape
-          : activeState.shape,
-      position:
-        phase === 'position' && parsed.position
-          ? parsed.position
-          : activeState.position,
-      next_steps:
-        phase === 'next_steps' && parsed.next_steps
-          ? parsed.next_steps.slice(0, 5)
-          : activeState.next_steps,
+      shape: parsed.shape ?? activeState.shape,
+      position: parsed.position ?? activeState.position,
       messages: [
         ...messagesWithUser,
         {

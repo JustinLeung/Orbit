@@ -50,7 +50,7 @@ describe('POST /api/assist/walkthrough', () => {
     expect(res.status).toBe(503)
   })
 
-  it('shape phase: starts with empty state and returns a shape', async () => {
+  it('shape phase: starts with empty state and returns a shape with action-bearing phases', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
@@ -59,9 +59,28 @@ describe('POST /api/assist/walkthrough', () => {
         shape: {
           goal: 'Align Q3 budget',
           phases: [
-            { id: 'p1', title: 'Pull last year actuals', status: 'not_started', category: 'research' },
-            { id: 'p2', title: 'Draft Q3 numbers', status: 'not_started', category: 'doing' },
-            { id: 'p3', title: 'Review with Sam', status: 'not_started', category: 'waiting' },
+            {
+              id: 'p1',
+              title: 'Pull last year actuals',
+              status: 'not_started',
+              category: 'research',
+              action: 'Download the Q2 actuals from Drive',
+              action_details: 'Then export the FY-to-date row',
+            },
+            {
+              id: 'p2',
+              title: 'Draft Q3 numbers',
+              status: 'not_started',
+              category: 'doing',
+              action: 'Block 60 min and draft top-line numbers',
+            },
+            {
+              id: 'p3',
+              title: 'Review with Sam',
+              status: 'not_started',
+              category: 'waiting',
+              action: 'Send the draft to Sam for review',
+            },
           ],
           completion_criteria: ['Sam approves the numbers'],
           inputs_needed: ['Last year actuals spreadsheet'],
@@ -77,6 +96,8 @@ describe('POST /api/assist/walkthrough', () => {
     expect(res.status).toBe(200)
     expect(res.body.state.phase).toBe('shape')
     expect(res.body.state.shape.phases).toHaveLength(3)
+    expect(res.body.state.shape.phases[0].action).toMatch(/Q2 actuals/)
+    expect(res.body.state.shape.phases[2].action).toMatch(/Sam/)
     expect(res.body.state.messages.at(-1)).toMatchObject({
       role: 'assistant',
       text: expect.stringContaining('shape'),
@@ -103,7 +124,6 @@ describe('POST /api/assist/walkthrough', () => {
           phase: 'shape',
           shape: null,
           position: null,
-          next_steps: null,
           messages: [
             { role: 'assistant', text: 'first turn', ts: '2026-04-28T00:00:00Z' },
           ],
@@ -120,11 +140,26 @@ describe('POST /api/assist/walkthrough', () => {
     expect(res.body.ready_to_advance).toBe(true)
   })
 
-  it('advance: bumps phase from shape to position before calling model', async () => {
+  it('advance: bumps phase from shape to refine before calling model', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
-        assistant_message: 'OK — where are you on this?',
+        assistant_message: 'OK — I refined that phase.',
+        shape: {
+          goal: 'x',
+          phases: [
+            {
+              id: 'p1',
+              title: 'P1',
+              description: null,
+              status: 'in_progress',
+              category: 'planning',
+              action: 'Draft the doc with the three options laid out',
+            },
+          ],
+          completion_criteria: [],
+          inputs_needed: [],
+        },
         position: { current_phase_id: 'p1', blockers: [], notes: null },
       }),
     })
@@ -139,19 +174,27 @@ describe('POST /api/assist/walkthrough', () => {
           phase: 'shape',
           shape: {
             goal: 'x',
-            phases: [{ id: 'p1', title: 'P1', description: null, status: 'not_started', category: 'planning' }],
+            phases: [
+              {
+                id: 'p1',
+                title: 'P1',
+                description: null,
+                status: 'not_started',
+                category: 'planning',
+                action: 'Generic placeholder action',
+              },
+            ],
             completion_criteria: [],
             inputs_needed: [],
           },
           position: null,
-          next_steps: null,
           messages: [],
         },
       })
 
-    expect(res.body.state.phase).toBe('position')
+    expect(res.body.state.phase).toBe('refine')
     expect(res.body.state.position).toMatchObject({ current_phase_id: 'p1' })
-    expect(res.body.state.shape).not.toBeNull() // carried forward
+    expect(res.body.state.shape.phases[0].action).toMatch(/three options/)
   })
 
   it('advance to done short-circuits without calling the model', async () => {
@@ -163,17 +206,15 @@ describe('POST /api/assist/walkthrough', () => {
         ticket: TICKET,
         advance: true,
         state: {
-          phase: 'next_steps',
+          phase: 'refine',
           shape: null,
           position: null,
-          next_steps: [{ kind: 'next_step', title: 'do x', details: null, category: 'doing' }],
           messages: [],
         },
       })
 
     expect(generateContent).not.toHaveBeenCalled()
     expect(res.body.state.phase).toBe('done')
-    expect(res.body.state.next_steps).toHaveLength(1)
   })
 
   it('502 on malformed JSON', async () => {
@@ -259,8 +300,20 @@ describe('POST /api/assist/walkthrough', () => {
         assistant_message: 'Here is the shape.',
         shape: {
           phases: [
-            { id: 'p1', title: 'Decide on theme', status: 'not_started', category: 'deciding' },
-            { id: 'p2', title: 'Wait for venue confirmation', status: 'not_started', category: 'waiting' },
+            {
+              id: 'p1',
+              title: 'Decide on theme',
+              status: 'not_started',
+              category: 'deciding',
+              action: 'Pick between woodland and beach themes',
+            },
+            {
+              id: 'p2',
+              title: 'Wait for venue confirmation',
+              status: 'not_started',
+              category: 'waiting',
+              action: 'Follow up with venue if no reply by Friday',
+            },
           ],
           completion_criteria: [],
           inputs_needed: [],
@@ -346,17 +399,27 @@ describe('POST /api/assist/walkthrough', () => {
     expect(promptText).toContain('https://example.test/spec')
   })
 
-  it('next_steps phase: caps at 5', async () => {
+  it('refine phase: takes updated shape from model and carries position forward', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
-        assistant_message: 'Try these.',
-        next_steps: Array.from({ length: 8 }, (_, i) => ({
-          kind: 'next_step',
-          title: `step ${i}`,
-          details: null,
-          category: 'doing',
-        })),
+        assistant_message: 'Refined the action for that phase.',
+        shape: {
+          goal: 'x',
+          phases: [
+            {
+              id: 'p1',
+              title: 'Research venues',
+              description: null,
+              status: 'in_progress',
+              category: 'research',
+              action: 'Email the three Pelican Hill candidates for May 18 availability',
+              action_details: 'Confirm capacity for 80 in your message',
+            },
+          ],
+          completion_criteria: [],
+          inputs_needed: [],
+        },
       }),
     })
     const app = await makeApp()
@@ -365,13 +428,29 @@ describe('POST /api/assist/walkthrough', () => {
       .send({
         ticket: TICKET,
         state: {
-          phase: 'next_steps',
-          shape: null,
-          position: null,
-          next_steps: null,
+          phase: 'refine',
+          shape: {
+            goal: 'x',
+            phases: [
+              {
+                id: 'p1',
+                title: 'Research venues',
+                description: null,
+                status: 'not_started',
+                category: 'research',
+                action: 'Look up venues',
+              },
+            ],
+            completion_criteria: [],
+            inputs_needed: [],
+          },
+          position: { current_phase_id: 'p1', blockers: [], notes: null },
           messages: [],
         },
+        user_message: 'wedding is May 18 at Pelican Hill, ~80 people',
       })
-    expect(res.body.state.next_steps).toHaveLength(5)
+    expect(res.body.state.phase).toBe('refine')
+    expect(res.body.state.shape.phases[0].action).toMatch(/Pelican Hill/)
+    expect(res.body.state.position).toMatchObject({ current_phase_id: 'p1' })
   })
 })

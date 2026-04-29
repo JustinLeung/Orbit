@@ -132,7 +132,7 @@ describe('runAssistTurn — dedup + failure handling', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
-        state: { phase: 'shape', shape: null, position: null, next_steps: null, messages: [] },
+        state: { phase: 'shape', shape: null, position: null, messages: [] },
         assistant_message: 'ok',
         ready_to_advance: false,
         ticket_updates: {
@@ -199,7 +199,7 @@ describe('runAssistTurn — dedup + failure handling', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
-        state: { phase: 'shape', shape: null, position: null, next_steps: null, messages: [] },
+        state: { phase: 'shape', shape: null, position: null, messages: [] },
         assistant_message: 'ok',
         ready_to_advance: false,
         ticket_updates: {
@@ -265,7 +265,7 @@ describe('runAssistTurn — dedup + failure handling', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
-        state: { phase: 'shape', shape: null, position: null, next_steps: null, messages: [] },
+        state: { phase: 'shape', shape: null, position: null, messages: [] },
         assistant_message: 'ok',
         ready_to_advance: false,
       }),
