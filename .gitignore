@@ -33,3 +33,6 @@ supabase/.env
 .env
 .env.*
 !.env.example
+
+# Local eval run artifacts
+server/lib/__evals__/

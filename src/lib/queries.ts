@@ -398,66 +398,73 @@ export async function runAssistTurn(args: {
         })
       }
     }
+    let ticketUpdateOk = true
     if (changes.length > 0) {
       try {
         ticket = await updateTicket(ticket.id, patch, { changedFields: changes })
         for (const c of changes) applied.push({ field: c.field, new: c.new })
       } catch (err) {
+        ticketUpdateOk = false
         console.error('walkthrough ticket_updates apply failed', err)
       }
     }
 
-    // Append-only child rows. We dedupe defensively against the snapshot we
-    // already fetched: the model has been told the existing list, but it
-    // still sometimes echoes items back.
-    const existingQuestions = new Set(
-      snapshot.open_questions
-        .filter((q) => !q.resolved)
-        .map((q) => q.question.trim().toLowerCase()),
-    )
-    let addedQuestions = 0
-    for (const q of proposed.open_questions_to_add ?? []) {
-      const text = q?.trim()
-      if (!text) continue
-      const key = text.toLowerCase()
-      if (existingQuestions.has(key)) continue
-      existingQuestions.add(key)
-      try {
-        await addOpenQuestion(ticket.id, text)
-        addedQuestions += 1
-      } catch (err) {
-        console.error('open_question add failed', err)
+    // Append-only child rows. Skip if the parent ticket update just failed —
+    // appending questions/refs and reporting them as "applied" while the
+    // scalar/DoD patch silently failed would lie to the user. Dedupe against
+    // the snapshot we already fetched: the model has been told the existing
+    // list but it still sometimes echoes items back. URL paths are
+    // case-sensitive so we only normalize whitespace, not case.
+    if (ticketUpdateOk) {
+      const existingQuestions = new Set(
+        snapshot.open_questions
+          .filter((q) => !q.resolved)
+          .map((q) => q.question.trim().toLowerCase()),
+      )
+      let addedQuestions = 0
+      for (const q of proposed.open_questions_to_add ?? []) {
+        const text = q?.trim()
+        if (!text) continue
+        const key = text.toLowerCase()
+        if (existingQuestions.has(key)) continue
+        existingQuestions.add(key)
+        try {
+          await addOpenQuestion(ticket.id, text)
+          addedQuestions += 1
+        } catch (err) {
+          console.error('open_question add failed', err)
+        }
       }
-    }
-    if (addedQuestions > 0) {
-      applied.push({ field: 'open_questions', new: `added ${addedQuestions}` })
-    }
+      if (addedQuestions > 0) {
+        applied.push({ field: 'open_questions', new: `added ${addedQuestions}` })
+      }
 
-    const existingRefs = new Set(
-      snapshot.references.map(
-        (r) => `${r.kind}::${(r.url_or_text ?? '').trim().toLowerCase()}`,
-      ),
-    )
-    let addedRefs = 0
-    for (const r of proposed.references_to_add ?? []) {
-      const url = r?.url_or_text?.trim()
-      if (!url) continue
-      const key = `${r.kind}::${url.toLowerCase()}`
-      if (existingRefs.has(key)) continue
-      existingRefs.add(key)
-      try {
-        await addReference(ticket.id, {
-          kind: r.kind,
-          url_or_text: url,
-          label: r.label ?? null,
-        })
-        addedRefs += 1
-      } catch (err) {
-        console.error('reference add failed', err)
+      const existingRefs = new Set(
+        snapshot.references.map(
+          (r) => `${r.kind}::${(r.url_or_text ?? '').trim()}`,
+        ),
+      )
+      let addedRefs = 0
+      for (const r of proposed.references_to_add ?? []) {
+        const url = r?.url_or_text?.trim()
+        if (!url) continue
+        const key = `${r.kind}::${url}`
+        if (existingRefs.has(key)) continue
+        existingRefs.add(key)
+        try {
+          await addReference(ticket.id, {
+            kind: r.kind,
+            url_or_text: url,
+            label: r.label ?? null,
+          })
+          addedRefs += 1
+        } catch (err) {
+          console.error('reference add failed', err)
+        }
       }
-    }
-    if (addedRefs > 0) {
-      applied.push({ field: 'references', new: `added ${addedRefs}` })
+      if (addedRefs > 0) {
+        applied.push({ field: 'references', new: `added ${addedRefs}` })
+      }
     }
   }
 
