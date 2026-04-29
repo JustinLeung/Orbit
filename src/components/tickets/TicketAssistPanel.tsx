@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowRight,
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
 } from '@/components/tickets/assistQuestions'
 import { cn } from '@/lib/utils'
 import {
+  markAssistBootstrapped,
   persistAssistState,
   runAssistTurn,
   updateTicket,
@@ -63,7 +64,6 @@ export function TicketAssistPanel({
   const [showFollowUp, setShowFollowUp] = useState(false)
   const [lastApplied, setLastApplied] = useState<string[]>([])
   const [refiningOpen, setRefiningOpen] = useState(false)
-  const bootstrappedRef = useRef(false)
   // Mirror the prop ticket into local state so we can show optimistic
   // updates from runAssistTurn / setNextAction without waiting for the
   // parent to refetch. Sync on prop change using the same render-time
@@ -76,16 +76,17 @@ export function TicketAssistPanel({
   }
 
   // Kick off the first turn so the user sees a shape without having to
-  // click anything. Only runs once, and only when nothing's persisted.
+  // click anything. Sticky module-level guard so we never fire twice for
+  // the same ticket within a page session — protects against StrictMode
+  // double-mount, dialog re-opens, or refetches that briefly invalidate
+  // `persisted` while a bootstrap is in flight.
   useEffect(() => {
     if (loadingState) return
-    if (bootstrappedRef.current) return
-    bootstrappedRef.current = true
-    if (!persisted) {
-      void doTurn({ state: null, userMessage: null, advance: false })
-    }
+    if (persisted) return
+    if (!markAssistBootstrapped(ticket.id)) return
+    void doTurn({ state: null, userMessage: null, advance: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingState, persisted])
+  }, [loadingState, persisted, ticket.id])
 
   async function doTurn(args: {
     state: AssistState | null
