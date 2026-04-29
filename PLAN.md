@@ -18,7 +18,7 @@ Tagline: Keep every open loop in motion.
 - Node + Express server (serves the Vite build and `/api/*` routes)
 - Supabase (local CLI for dev, hosted later) — ports remapped to 544xx (see supabase/config.toml)
 - Auth: Email OTP (6-digit code, via Supabase Auth)
-- AI: Gemini (Assist mode only for MVP, called server-side via Edge Function)
+- AI: Gemini (Assist mode only for MVP, called from the Express server — `/api/assist/clarify` for ticket capture)
 - Email: Resend, called from the Express server (`/api/send-email`)
 - Hosting: Render (Web Service, Node runtime)
 
@@ -204,6 +204,7 @@ For MVP: `none`, `assist`.
 
 ### Assist Mode Can
 
+- ask clarifying questions during ticket capture and draft the resulting ticket (shipped — `/api/assist/clarify`)
 - summarize ticket
 - suggest next action
 - draft follow-up message

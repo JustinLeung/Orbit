@@ -7,7 +7,11 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { TicketCreateDialog } from '@/components/tickets/TicketCreateDialog'
+import {
+  TicketCreateDialog,
+  type TicketCreatePrefill,
+} from '@/components/tickets/TicketCreateDialog'
+import { TicketCreateChat } from '@/components/tickets/TicketCreateChat'
 import type { TicketStatus } from '@/types/orbit'
 
 type CreateTicketContextValue = {
@@ -18,18 +22,34 @@ const CreateTicketContext = createContext<CreateTicketContextValue | undefined>(
   undefined,
 )
 
+type Mode = 'closed' | 'chat' | 'manual'
+
 export function CreateTicketProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<Mode>('closed')
   const [defaultStatus, setDefaultStatus] = useState<TicketStatus | undefined>(
     undefined,
   )
+  const [manualPrefill, setManualPrefill] = useState<
+    TicketCreatePrefill | undefined
+  >(undefined)
 
   const openCreate = useCallback((status?: TicketStatus) => {
     setDefaultStatus(status)
-    setOpen(true)
+    setManualPrefill(undefined)
+    setMode('chat')
   }, [])
 
-  // Global "n" shortcut to open the full editor — ignored while typing.
+  const switchToManual = useCallback((prefill?: TicketCreatePrefill) => {
+    setManualPrefill(prefill)
+    setMode('manual')
+  }, [])
+
+  const closeAll = useCallback(() => {
+    setMode('closed')
+    setManualPrefill(undefined)
+  }, [])
+
+  // Global "n" shortcut to start ticket capture — ignored while typing.
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null) {
       if (!(target instanceof HTMLElement)) return false
@@ -56,10 +76,21 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
   return (
     <CreateTicketContext.Provider value={value}>
       {children}
-      <TicketCreateDialog
-        open={open}
-        onOpenChange={setOpen}
+      <TicketCreateChat
+        open={mode === 'chat'}
+        onOpenChange={(open) => {
+          if (!open) closeAll()
+        }}
+        onSwitchToManual={switchToManual}
         defaultStatus={defaultStatus}
+      />
+      <TicketCreateDialog
+        open={mode === 'manual'}
+        onOpenChange={(open) => {
+          if (!open) closeAll()
+        }}
+        defaultStatus={defaultStatus}
+        prefill={manualPrefill}
       />
     </CreateTicketContext.Provider>
   )
