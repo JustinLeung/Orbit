@@ -295,3 +295,58 @@ describe('runAssistTurn — dedup + failure handling', () => {
     ])
   })
 })
+
+describe('addTicketNote', () => {
+  it('inserts a note_added event with trimmed body and notifies listeners', async () => {
+    const insert = vi.fn().mockReturnValue({
+      select: () => ({
+        single: () =>
+          Promise.resolve({
+            data: {
+              id: 'evt-1',
+              ticket_id: 'ticket-1',
+              event_type: 'note_added',
+              payload: { body: 'hello world' },
+            },
+            error: null,
+          }),
+      }),
+    })
+    tableHandlers = {
+      ticket_events: () => ({ insert }),
+    }
+
+    const refresh = vi.fn()
+    window.addEventListener('orbit:ticket-events-changed', refresh)
+
+    try {
+      const { addTicketNote } = await import('./queries')
+      const result = await addTicketNote('ticket-1', '  hello world  \n')
+
+      expect(insert).toHaveBeenCalledTimes(1)
+      expect(insert.mock.calls[0][0]).toMatchObject({
+        user_id: 'u',
+        ticket_id: 'ticket-1',
+        event_type: 'note_added',
+        payload: { body: 'hello world' },
+      })
+      expect(result.event_type).toBe('note_added')
+      expect(refresh).toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('orbit:ticket-events-changed', refresh)
+    }
+  })
+
+  it('rejects empty bodies without touching the database', async () => {
+    const insert = vi.fn()
+    tableHandlers = {
+      ticket_events: () => ({ insert }),
+    }
+
+    const { addTicketNote } = await import('./queries')
+    await expect(addTicketNote('ticket-1', '   \n  ')).rejects.toThrow(
+      /empty/i,
+    )
+    expect(insert).not.toHaveBeenCalled()
+  })
+})
