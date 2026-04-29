@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type {
+  AgentRun,
   Person,
   Ticket,
   TicketEventInsert,
@@ -8,6 +9,7 @@ import type {
   TicketStatus,
   TicketUpdate,
 } from '@/types/orbit'
+import type { AssistState } from '@/lib/assistTypes'
 
 type State<T> = {
   data: T
@@ -188,6 +190,198 @@ export async function createTicket(
 
   notifyTicketsChanged()
   return ticket
+}
+
+const ASSIST_CHANGED_EVENT = 'orbit:assist-changed'
+function notifyAssistChanged() {
+  window.dispatchEvent(new CustomEvent(ASSIST_CHANGED_EVENT))
+}
+
+function ticketSnapshot(ticket: Ticket) {
+  return {
+    title: ticket.title,
+    description: ticket.description,
+    type: ticket.type,
+    status: ticket.status,
+    goal: ticket.goal,
+    next_action: ticket.next_action,
+    next_action_at: ticket.next_action_at,
+    urgency: ticket.urgency,
+    importance: ticket.importance,
+    energy_required: ticket.energy_required,
+    context: ticket.context,
+  }
+}
+
+// We persist the full assist state in agent_runs.output (JSON-stringified) —
+// each turn appends a new row, latest = current. Semantically a stretch on a
+// "single model call" table, but avoids a migration. See PLAN.md for the
+// follow-up to move this to a dedicated tickets.assist_state column.
+export function useLatestAssistState(ticketId: string | null) {
+  const [data, setData] = useState<AssistState | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => {
+    if (!ticketId) {
+      setData(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    supabase
+      .from('agent_runs')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data: row, error }) => {
+        if (cancelled) return
+        if (error) console.error('useLatestAssistState', error)
+        setData(parseAssistState(row))
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ticketId, version])
+
+  useEffect(() => {
+    function refresh() {
+      setVersion((v) => v + 1)
+    }
+    window.addEventListener(ASSIST_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(ASSIST_CHANGED_EVENT, refresh)
+  }, [])
+
+  return { data, loading }
+}
+
+function parseAssistState(run: AgentRun | null | undefined): AssistState | null {
+  if (!run?.output) return null
+  try {
+    return JSON.parse(run.output) as AssistState
+  } catch {
+    return null
+  }
+}
+
+type TicketUpdatesPatch = {
+  goal?: string | null
+  description?: string | null
+  next_action?: string | null
+  next_action_at?: string | null
+  type?: Ticket['type'] | null
+  context?: string | null
+}
+
+// Calls /api/assist/walkthrough, persists the new state as a fresh agent_run,
+// applies any model-proposed ticket_updates back onto the ticket itself
+// (with field_updated audit events), and writes an `agent_ran` ticket_event.
+// Returns the new state + the (possibly updated) ticket.
+export async function runAssistTurn(args: {
+  ticket: Ticket
+  state: AssistState | null
+  userMessage: string | null
+  advance?: boolean
+}): Promise<{
+  state: AssistState
+  assistant_message: string
+  ready_to_advance: boolean
+  ticket: Ticket
+  applied_updates: Array<{ field: string; new: FieldChangeValue }>
+}> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const snapshot = ticketSnapshot(args.ticket)
+  const res = await fetch('/api/assist/walkthrough', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ticket: snapshot,
+      state: args.state,
+      user_message: args.userMessage,
+      advance: args.advance ?? false,
+    }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Request failed (${res.status})`)
+  }
+  const nextState = body.state as AssistState
+  const proposed = body.ticket_updates as TicketUpdatesPatch | null
+
+  // Apply ticket_updates: only fields where the proposed value differs from
+  // the current ticket. We always preserve title (user's anchor).
+  let ticket = args.ticket
+  const applied: Array<{ field: string; new: FieldChangeValue }> = []
+  if (proposed) {
+    const patch: TicketUpdate = {}
+    const changes: FieldChange[] = []
+    const fields: Array<keyof TicketUpdatesPatch> = [
+      'goal',
+      'description',
+      'next_action',
+      'next_action_at',
+      'type',
+      'context',
+    ]
+    for (const f of fields) {
+      const v = proposed[f]
+      if (v === undefined || v === null) continue
+      const current = ticket[f as keyof Ticket] as FieldChangeValue
+      if (current === v) continue
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(patch as any)[f] = v
+      changes.push({ field: f, old: current ?? null, new: v as FieldChangeValue })
+    }
+    if (changes.length > 0) {
+      try {
+        ticket = await updateTicket(ticket.id, patch, { changedFields: changes })
+        for (const c of changes) applied.push({ field: c.field, new: c.new })
+      } catch (err) {
+        console.error('walkthrough ticket_updates apply failed', err)
+      }
+    }
+  }
+
+  const { error: runErr } = await supabase.from('agent_runs').insert({
+    user_id: userId,
+    ticket_id: ticket.id,
+    input_context: {
+      snapshot,
+      prev_state: args.state,
+      advance: args.advance ?? false,
+    },
+    output: JSON.stringify(nextState),
+    needs_feedback: false,
+  })
+  if (runErr) console.error('agent_runs insert failed', runErr)
+
+  const { error: evtErr } = await supabase.from('ticket_events').insert({
+    user_id: userId,
+    ticket_id: ticket.id,
+    event_type: 'agent_ran',
+    payload: {
+      agent: 'walkthrough',
+      phase: nextState.phase,
+      applied_field_count: applied.length,
+    },
+  })
+  if (evtErr) console.error('agent_ran event insert failed', evtErr)
+
+  notifyAssistChanged()
+  return {
+    state: nextState,
+    assistant_message: body.assistant_message ?? '',
+    ready_to_advance: body.ready_to_advance === true,
+    ticket,
+    applied_updates: applied,
+  }
 }
 
 export type FieldChangeValue = string | number | null

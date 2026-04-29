@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sendEmailRoute from './routes/send-email.js'
 import sendOtpRoute from './routes/send-otp.js'
-import assistClarifyRoute from './routes/assist-clarify.js'
+import assistWalkthroughRoute from './routes/assist-walkthrough.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -16,7 +16,7 @@ app.get('/healthz', (_req, res) => {
 
 app.use('/api/send-email', sendEmailRoute)
 app.use('/api/auth/send-otp', sendOtpRoute)
-app.use('/api/assist/clarify', assistClarifyRoute)
+app.use('/api/assist/walkthrough', assistWalkthroughRoute)
 
 const distPath = path.resolve(__dirname, '../dist')
 app.use(express.static(distPath))
