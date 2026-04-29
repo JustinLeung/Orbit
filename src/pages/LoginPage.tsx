@@ -11,10 +11,6 @@ type Status =
   | { kind: 'verifying' }
   | { kind: 'error'; message: string }
 
-// Google is temporarily disabled in all environments — production redirects
-// back to localhost instead of orbit-app.cc. Re-enable once ORB-5 is fixed.
-const SHOW_GOOGLE = false
-
 export function LoginPage() {
   const { session, loading, sendOtp, verifyOtp, signInWithGoogle } = useAuth()
   const [email, setEmail] = useState('')
@@ -67,24 +63,22 @@ export function LoginPage() {
           Keep every open loop in motion.
         </p>
 
-        {SHOW_GOOGLE ? (
-          <div className="mt-6 space-y-3">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={onGoogle}
-              disabled={status.kind === 'sending'}
-            >
-              {status.kind === 'sending' ? 'Redirecting…' : 'Continue with Google'}
-            </Button>
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              or
-              <span className="h-px flex-1 bg-border" />
-            </div>
+        <div className="mt-6 space-y-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={onGoogle}
+            disabled={status.kind === 'sending'}
+          >
+            {status.kind === 'sending' ? 'Redirecting…' : 'Continue with Google'}
+          </Button>
+          <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            or
+            <span className="h-px flex-1 bg-border" />
           </div>
-        ) : null}
+        </div>
 
         {!awaitingCode ? (
           <form onSubmit={onSendOtp} className="mt-3 space-y-3">
