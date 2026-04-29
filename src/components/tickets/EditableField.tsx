@@ -39,6 +39,11 @@ export type EditableFieldProps<T> = {
   multiline?: boolean
   // Some fields (selects/datetime) commit on change rather than on blur.
   commitOnChange?: boolean
+  // Override the read-mode button styling. When set we also drop the
+  // built-in label rendering — callers using readClassName own the layout.
+  readClassName?: string
+  // Hide the keyboard-shortcut hint shown beneath the input in edit mode.
+  hideHint?: boolean
 }
 
 type Mode = 'read' | 'edit' | 'saving'
@@ -59,6 +64,8 @@ export function EditableField<T>({
   onSave,
   multiline,
   commitOnChange,
+  readClassName,
+  hideHint,
 }: EditableFieldProps<T>) {
   const [mode, setMode] = useState<Mode>('read')
   const [draft, setDraft] = useState('')
@@ -135,6 +142,47 @@ export function EditableField<T>({
   const display = serialize(value)
   const isPlaceholder = display === null || display === ''
 
+  // When `readClassName` is provided, render a label-less variant — caller
+  // owns the read-mode styling (used by the title and description in the
+  // detail dialog where labels live elsewhere).
+  if (readClassName !== undefined) {
+    return mode === 'read' ? (
+      <button
+        type="button"
+        onClick={startEdit}
+        className={cn(readClassName, isPlaceholder && 'text-muted-foreground')}
+      >
+        {isPlaceholder ? placeholder : display}
+      </button>
+    ) : (
+      <div>
+        {/* eslint-disable-next-line react-hooks/refs */}
+        {renderInput({
+          draft,
+          setDraft,
+          onCommit: () => void commit(),
+          commitWith: (d) => void commit(d),
+          onCancel: cancel,
+          onKeyDown: handleKeyDown,
+          invalid: error !== null,
+          inputRef: setInputRef,
+        })}
+        {error ? (
+          <p className="mt-1 text-xs text-destructive">{error}</p>
+        ) : null}
+        {hideHint ? null : (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {commitOnChange
+              ? 'Esc to cancel'
+              : multiline
+                ? 'Cmd+Enter to save · Esc to cancel'
+                : 'Enter to save · Esc to cancel'}
+          </p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div>
       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -169,13 +217,15 @@ export function EditableField<T>({
           {error ? (
             <p className="mt-1 text-xs text-destructive">{error}</p>
           ) : null}
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {commitOnChange
-              ? 'Esc to cancel'
-              : multiline
-                ? 'Cmd+Enter to save · Esc to cancel'
-                : 'Enter to save · Esc to cancel'}
-          </p>
+          {hideHint ? null : (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {commitOnChange
+                ? 'Esc to cancel'
+                : multiline
+                  ? 'Cmd+Enter to save · Esc to cancel'
+                  : 'Enter to save · Esc to cancel'}
+            </p>
+          )}
         </div>
       )}
     </div>

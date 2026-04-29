@@ -6,6 +6,7 @@ import type {
   DefinitionOfDoneItem,
   Person,
   Ticket,
+  TicketEvent,
   TicketEventInsert,
   TicketInsert,
   TicketOpenQuestion,
@@ -851,4 +852,63 @@ export async function deleteReference(id: string): Promise<void> {
     .eq('id', id)
   if (error) throw error
   notifyReferencesChanged()
+}
+
+// ── ticket_events ────────────────────────────────────────────────────────
+
+// Pulls the ticket's append-only audit log in chronological order. Callers
+// that want newest-first display reverse it themselves (TicketActivity does
+// this — see its comment). Pass null to keep the hook idle (e.g. while the
+// detail dialog is closed). Refreshes on the global events driven by flows
+// that write into ticket_events: ticket field updates / status transitions
+// (TICKETS_CHANGED_EVENT) and assist runs (ASSIST_CHANGED_EVENT).
+export function useTicketEvents(ticketId: string | null) {
+  const [state, dispatch] = useReducer(
+    fetchReducer as Reducer<
+      FetchState<TicketEvent[]>,
+      FetchAction<TicketEvent[]>
+    >,
+    { data: [], loading: false, error: null },
+  )
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => {
+    if (!ticketId) {
+      dispatch({ type: 'reset', data: [] })
+      return
+    }
+    let cancelled = false
+    dispatch({ type: 'start' })
+    supabase
+      .from('ticket_events')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+      .then(({ data: rows, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.error('useTicketEvents', error)
+          dispatch({ type: 'failure', error })
+          return
+        }
+        dispatch({ type: 'success', data: rows ?? [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ticketId, version])
+
+  useEffect(() => {
+    function refresh() {
+      setVersion((v) => v + 1)
+    }
+    window.addEventListener(TICKETS_CHANGED_EVENT, refresh)
+    window.addEventListener(ASSIST_CHANGED_EVENT, refresh)
+    return () => {
+      window.removeEventListener(TICKETS_CHANGED_EVENT, refresh)
+      window.removeEventListener(ASSIST_CHANGED_EVENT, refresh)
+    }
+  }, [])
+
+  return { data: state.data, loading: state.loading, error: state.error }
 }

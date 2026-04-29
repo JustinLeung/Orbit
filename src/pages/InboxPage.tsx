@@ -17,6 +17,7 @@ export function InboxPage() {
         loading={loading}
         error={error}
         empty="No tickets in your inbox."
+        groupBy="none"
       />
     </>
   )
