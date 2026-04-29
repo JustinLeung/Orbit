@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { updateTicket, type FieldChangeValue } from '@/lib/queries'
 import { EditableField } from '@/components/tickets/EditableField'
-import { TicketAssistView } from '@/components/tickets/TicketAssistView'
+import { TicketAssistPanel } from '@/components/tickets/TicketAssistPanel'
 import { TicketContextSections } from '@/components/tickets/TicketContextSections'
 import { TicketActivity } from '@/components/tickets/TicketActivity'
 import { Textarea } from '@/components/tickets/form-helpers'
@@ -300,9 +300,16 @@ export function TicketDetailDialog({
                       />
                     )}
 
-                    {/* Assist callout */}
+                    {/* Assist panel — drives shape → pick phase → structured Qs → next steps inline */}
                     <div className="mt-6">
-                      <TicketAssistView ticket={editing} />
+                      <TicketAssistPanel
+                        ticket={editing}
+                        onTicketChange={(next) =>
+                          setEditing((cur) =>
+                            cur && cur.id === next.id ? next : cur,
+                          )
+                        }
+                      />
                     </div>
 
                     {/* Sub-issues / open questions / references */}

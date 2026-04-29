@@ -33,7 +33,7 @@ See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
 - **npm** ≥ 10
 - **Docker Desktop** — required for the local Supabase stack
 - **Supabase CLI** — `brew install supabase/tap/supabase`
-- A Gemini API key for ticket-capture assist (`GEMINI_API_KEY`) — without it the new-ticket dialog falls back to the manual form
+- A Gemini API key for ticket-capture assist (`GEMINI_API_KEY`) — without it the assist panel inside each ticket shows an inline error; tickets can still be captured and edited by hand
 
 > Auth in dev: each sign-in email contains both a 6-digit code and a magic
 > link — use whichever is convenient. Without `RESEND_API_KEY` set, the
@@ -86,7 +86,7 @@ Defined in `.env` (git-ignored). Template lives in `.env.example`.
 | `VITE_SUPABASE_URL`                   | Browser              | Local default: `http://127.0.0.1:54421`. Inlined at build time.      |
 | `VITE_SUPABASE_ANON_KEY`              | Browser              | Printed by `supabase status -o env` after `supabase start`. Inlined at build time. |
 | `SUPABASE_SERVICE_ROLE_KEY`           | Server + seed script | Bypasses RLS. Used by `/api/auth/send-otp` (admin `generateLink`) and `npm run seed`. Never expose to the browser. |
-| `GEMINI_API_KEY`                      | Express server       | Powers `/api/assist/walkthrough` — the phased capture/assist flow (Shape → Position → Next steps). Server-side only. If unset, the assist UI shows an inline error and the manual ticket form is still available. |
+| `GEMINI_API_KEY`                      | Express server       | Powers `/api/assist/walkthrough` — the structured assist flow (Shape → pick current phase → structured questions refine that phase's action in place), embedded inside the ticket detail dialog. Server-side only. If unset, the assist panel shows an inline error; tickets can still be captured (title-only) and edited by hand. |
 | `PORT`                                | Express server       | Local dev default `3000`. Render injects this in production.         |
 | `RESEND_API_KEY`                      | Express server       | Used by `/api/send-email` and `/api/auth/send-otp`. Server-side only. If unset in dev, the OTP route logs the code + link to the server terminal instead of sending. |
 | `RESEND_FROM`                         | Express server       | Verified Resend sender, e.g. `Orbit <noreply@yourdomain.com>`        |
@@ -127,16 +127,21 @@ src/
   components/
     auth/            # RequireAuth route guard
     layout/          # AppLayout (sidebar) + PageHeader
-    tickets/         # TicketList, TicketDetailDialog (inline-edit),
-                     # TicketCreateChat (capture entry — creates the ticket
-                     #   up front, then mounts TicketAssistChat),
-                     # TicketAssistChat (Shape → Position → Next steps walk-
-                     #   through; conversation persists across sessions),
-                     # TicketAssistView (compact summary in detail dialog
-                     #   with "Continue" to reopen the chat),
+    tickets/         # TicketList, TicketDetailDialog (inline-edit, hosts
+                     #   the assist panel),
+                     # TicketCreateInline (title-only quick capture — creates
+                     #   the ticket and routes the user into TicketDetailDialog),
+                     # TicketAssistPanel (inline assist surface: AI generates
+                     #   a shape where each phase carries its own concrete
+                     #   `action`. The user clicks the phase they're in,
+                     #   structured questions per phase category refine that
+                     #   phase's action in place, and "Set as next action"
+                     #   on any phase row promotes its action to ticket.next_action.
+                     #   Free-form chat is demoted to a follow-up),
+                     # assistQuestions.ts (static prompt catalog per
+                     #   PhaseCategory + formatStructuredAnswers helper),
                      # TicketContextSections (DoD checklist, open questions,
                      #   references — mounted in TicketDetailDialog),
-                     # TicketCreateDialog (manual fallback),
                      # QuickAddInput, EditableField,
                      # form-helpers (FormField/Textarea/Select/ScaleSelect),
                      # form-constants (TYPE/STATUS/AGENT_MODE_OPTIONS,
@@ -278,7 +283,7 @@ React build and `/api/*` routes, so there's one URL and one process.
    - `SUPABASE_SERVICE_ROLE_KEY` (hosted service role — server-side only, used by `/api/auth/send-otp`)
    - `RESEND_API_KEY`
    - `RESEND_FROM` (e.g. `Orbit <noreply@yourdomain.com>`)
-   - `GEMINI_API_KEY` (optional — without it, the new-ticket dialog returns 503 and the UI offers manual entry)
+   - `GEMINI_API_KEY` (optional — without it, the assist panel inside each ticket returns 503; tickets can still be captured and edited by hand)
 
    `VITE_*` vars are inlined at build time, so changing them requires a redeploy.
 3. Health check is wired to `/healthz`. Build runs `npm ci && npm run build`;
@@ -316,12 +321,18 @@ keeps using `npm run seed` with its own custom data.
   the sidebar or the `n` shortcut) — see ORB-6
 - [x] Inline-edit ticket detail dialog (click-to-edit per field, optimistic
   save, audit via `field_updated` event) — see ORB-7
-- [x] Phased assist flow on every ticket (`/api/assist/walkthrough`):
-  **Shape** (the whole arc — goal, phases, completion criteria, inputs needed)
-  → **Position** (where you are, what's blocked) → **Next steps** (concrete
-  actions). Conversation + state persist in `agent_runs`, so you can leave
-  the dialog at any time and pick up where you left off from the ticket
-  detail's Assist panel. Manual ticket form stays available as a fallback.
+- [x] Structured assist flow on every ticket (`/api/assist/walkthrough`):
+  the AI generates a **Shape** (goal, 3–5 phases, completion criteria,
+  inputs needed) where each phase carries its own concrete `action` —
+  phases ARE the action plan, there's no separate next-steps list. The
+  user clicks the phase they're in; category-specific **structured
+  questions** refine that phase's action **in place** so it reflects the
+  user's current situation. "Set as next action" on any phase row promotes
+  that phase's action to `ticket.next_action`. Free-form chat is demoted
+  to an "Ask a follow-up" affordance. State persists in `agent_runs` so
+  you can leave the ticket at any time and pick up where you left off
+  from the embedded assist panel. New tickets capture title-only and
+  route straight into the detail dialog.
 - [ ] Ticket detail view with history (`ticket_events` rendered in the dialog)
 - [x] Status transitions (header dropdown + per-row quick action; emits
   `status_changed` events with `{from, to}` payload and auto-manages
