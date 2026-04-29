@@ -324,6 +324,15 @@ export function TicketPlanRail({
                         </span>
                         <span className="mt-1 flex items-center gap-1.5">
                           <PhaseCategoryPill category={p.category} />
+                          {p.definition_of_done.length > 0 ? (
+                            <span
+                              className="text-[10px] tabular-nums text-muted-foreground"
+                              aria-label={`${p.definition_of_done.filter((d) => d.done).length} of ${p.definition_of_done.length} DoD items done`}
+                            >
+                              {p.definition_of_done.filter((d) => d.done).length}/
+                              {p.definition_of_done.length}
+                            </span>
+                          ) : null}
                         </span>
                         {p.action ? (
                           <span className="mt-1 line-clamp-2 block text-[11px] leading-snug text-muted-foreground">

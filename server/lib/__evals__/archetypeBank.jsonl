@@ -1,0 +1,89 @@
+{"id": "evt-001", "title": "Plan Katja's birthday", "expected": "event_planning", "notes": "clear event keyword"}
+{"id": "evt-002", "title": "Throw a small dinner party for Sam's promotion", "expected": "event_planning"}
+{"id": "evt-003", "title": "Organize the team offsite", "expected": "event_planning"}
+{"id": "evt-004", "title": "Wedding planning checklist", "expected": "event_planning"}
+{"id": "evt-005", "title": "Host friendsgiving this year", "expected": "event_planning"}
+{"id": "evt-006", "title": "Set up a baby shower for Maya", "expected": "event_planning"}
+{"id": "evt-007", "title": "End-of-year holiday party", "description": "Need to find venue and send invites for ~30 people", "expected": "event_planning"}
+
+{"id": "gift-001", "title": "Find a Mother's Day gift for my mom", "expected": "gift_purchase"}
+{"id": "gift-002", "title": "Birthday gift for Lina", "expected": "gift_purchase", "notes": "birthday keyword but it's a gift not the event"}
+{"id": "gift-003", "title": "Buy a wedding gift for Tom and Priya", "expected": "gift_purchase"}
+{"id": "gift-004", "title": "What should I get dad for Father's Day", "expected": "gift_purchase"}
+{"id": "gift-005", "title": "Anniversary present for spouse", "expected": "gift_purchase"}
+{"id": "gift-006", "title": "Pick out a housewarming gift for the Rileys", "expected": "gift_purchase"}
+{"id": "gift-007", "title": "Looking for a thoughtful 30th birthday gift for my brother", "expected": "gift_purchase"}
+
+{"id": "trip-001", "title": "Plan trip to Lisbon in May", "expected": "trip_planning"}
+{"id": "trip-002", "title": "Visit grandma in Vermont next month", "expected": "trip_planning"}
+{"id": "trip-003", "title": "Book vacation for August", "expected": "trip_planning"}
+{"id": "trip-004", "title": "Weekend getaway with partner", "expected": "trip_planning"}
+{"id": "trip-005", "title": "Family trip to Japan", "description": "Two weeks, need flights and hotels and itinerary", "expected": "trip_planning"}
+{"id": "trip-006", "title": "Road trip down the California coast", "expected": "trip_planning"}
+
+{"id": "dec-001", "title": "Decide whether to take the new job offer", "expected": "decision"}
+{"id": "dec-002", "title": "Should I move to Berlin or stay in NYC", "expected": "decision"}
+{"id": "dec-003", "title": "Pick between two daycares", "expected": "decision"}
+{"id": "dec-004", "title": "Choose a therapist", "expected": "decision"}
+{"id": "dec-005", "title": "MBA: worth it or not", "expected": "decision"}
+{"id": "dec-006", "title": "Sell the old car or keep as backup", "expected": "decision"}
+
+{"id": "hire-001", "title": "Hire a senior backend engineer", "expected": "hiring"}
+{"id": "hire-002", "title": "Fill the head of design role", "expected": "hiring"}
+{"id": "hire-003", "title": "Interview candidates for the PM opening", "expected": "hiring"}
+{"id": "hire-004", "title": "Find a contractor for the new website", "expected": "hiring", "notes": "contractor hire, edge case but still hiring"}
+{"id": "hire-005", "title": "Get a nanny for the fall", "expected": "hiring"}
+{"id": "hire-006", "title": "Source candidates for the staff data scientist role", "expected": "hiring"}
+
+{"id": "rsrch-001", "title": "Research the new tax rules for freelancers", "expected": "research"}
+{"id": "rsrch-002", "title": "Learn about retirement account options", "expected": "research"}
+{"id": "rsrch-003", "title": "Understand how Postgres replication works", "expected": "research"}
+{"id": "rsrch-004", "title": "Look into therapy modalities for anxiety", "expected": "research"}
+{"id": "rsrch-005", "title": "Read up on the EU AI Act", "expected": "research"}
+{"id": "rsrch-006", "title": "Figure out how vesting cliffs work", "expected": "research"}
+
+{"id": "bug-001", "title": "Fix the leaky kitchen faucet", "expected": "bug_fix"}
+{"id": "bug-002", "title": "Car won't start in the cold", "expected": "bug_fix"}
+{"id": "bug-003", "title": "Debug the CI failure on the auth tests", "expected": "bug_fix"}
+{"id": "bug-004", "title": "Heater isn't working in the spare bedroom", "expected": "bug_fix"}
+{"id": "bug-005", "title": "Repair the broken garden gate", "expected": "bug_fix"}
+{"id": "bug-006", "title": "Wifi keeps dropping in the office", "expected": "bug_fix"}
+
+{"id": "wait-001", "title": "Waiting on Sam to send the contract", "expected": "waiting_followup"}
+{"id": "wait-002", "title": "Follow up with the landlord about the deposit", "expected": "waiting_followup"}
+{"id": "wait-003", "title": "Ping the recruiter if no response by Friday", "expected": "waiting_followup"}
+{"id": "wait-004", "title": "Track down the missing reimbursement", "expected": "waiting_followup"}
+{"id": "wait-005", "title": "Check in with Mira about her review of the doc", "expected": "waiting_followup"}
+{"id": "wait-006", "title": "Waiting on visa decision", "expected": "waiting_followup"}
+
+{"id": "write-001", "title": "Write the conference talk on observability", "expected": "writing"}
+{"id": "write-002", "title": "Draft the year-in-review blog post", "expected": "writing"}
+{"id": "write-003", "title": "Finish the cover letter for the Stripe role", "expected": "writing"}
+{"id": "write-004", "title": "Outline the keynote slides", "expected": "writing"}
+{"id": "write-005", "title": "Edit and publish the essay on burnout", "expected": "writing"}
+{"id": "write-006", "title": "Application essay for grad school", "expected": "writing"}
+
+{"id": "admin-001", "title": "Renew passport before May", "expected": "admin_paperwork"}
+{"id": "admin-002", "title": "File 2025 taxes", "expected": "admin_paperwork"}
+{"id": "admin-003", "title": "Submit the visa renewal paperwork", "expected": "admin_paperwork"}
+{"id": "admin-004", "title": "Register the LLC", "expected": "admin_paperwork"}
+{"id": "admin-005", "title": "Update insurance beneficiaries", "expected": "admin_paperwork"}
+{"id": "admin-006", "title": "Switch over the utilities to the new place", "expected": "admin_paperwork"}
+
+{"id": "rel-001", "title": "Reconnect with Jamie — haven't talked in 6 months", "expected": "relationship"}
+{"id": "rel-002", "title": "Quarterly check-in with my old mentor", "expected": "relationship"}
+{"id": "rel-003", "title": "Reach out to college roommate", "expected": "relationship"}
+{"id": "rel-004", "title": "Stay in better touch with grandma", "expected": "relationship"}
+{"id": "rel-005", "title": "Set up a regular catch-up with Theo", "expected": "relationship"}
+{"id": "rel-006", "title": "Schedule a coffee with Priya before she moves", "expected": "relationship"}
+
+{"id": "other-001", "title": "Sort out the kitchen", "expected": "other", "notes": "intentionally vague"}
+{"id": "other-002", "title": "Get my life together", "expected": "other"}
+{"id": "other-003", "title": "Stuff", "expected": "other"}
+{"id": "other-004", "title": "Errands this weekend", "expected": "other", "notes": "could be many things"}
+{"id": "other-005", "title": "Look into things", "expected": "other"}
+{"id": "other-006", "title": "Buy groceries", "expected": "other", "notes": "purchase but routine, not a gift"}
+{"id": "other-007", "title": "Clean out the garage", "expected": "other"}
+{"id": "other-008", "title": "Side project ideas", "expected": "other"}
+{"id": "other-009", "title": "Fitness goals for Q2", "expected": "other"}
+{"id": "other-010", "title": "Read more this year", "expected": "other"}

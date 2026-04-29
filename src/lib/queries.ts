@@ -375,10 +375,15 @@ function parseAssistState(run: AgentRun | null | undefined): AssistState | null 
     // Backfill fields added after rows were originally written:
     //   - next_question: defaults to null
     //   - shape.suggested_steps: defaults to []
+    //   - shape.phases[*].definition_of_done: defaults to []
     const shape = parsed.shape
       ? {
           ...parsed.shape,
           suggested_steps: parsed.shape.suggested_steps ?? [],
+          phases: (parsed.shape.phases ?? []).map((p) => ({
+            ...p,
+            definition_of_done: p.definition_of_done ?? [],
+          })),
         }
       : null
     return {
@@ -563,6 +568,9 @@ export async function runAssistTurn(args: {
     }
   }
 
+  const classifier = body.classifier ?? null
+  const templateUsed = body.template_used ?? null
+
   const { error: runErr } = await supabase.from('agent_runs').insert({
     user_id: userId,
     ticket_id: ticket.id,
@@ -570,6 +578,8 @@ export async function runAssistTurn(args: {
       snapshot,
       prev_state: args.state,
       advance: args.advance ?? false,
+      classifier,
+      template_used: templateUsed,
     },
     output: JSON.stringify(nextState),
     needs_feedback: false,
@@ -584,6 +594,7 @@ export async function runAssistTurn(args: {
       agent: 'walkthrough',
       phase: nextState.phase,
       applied_field_count: applied.length,
+      template_used: templateUsed,
     },
   })
   if (evtErr) console.error('agent_ran event insert failed', evtErr)
@@ -669,6 +680,7 @@ export function appendPhaseToShape(
     category: input.category ?? 'doing',
     action: title,
     action_details: null,
+    definition_of_done: [],
   }
   return {
     ...state,
@@ -737,6 +749,7 @@ export function insertPhaseAtPosition(
     category: input.category ?? 'doing',
     action: title,
     action_details: null,
+    definition_of_done: [],
   }
   let insertIdx = phases.length
   if (position.kind !== 'end') {
@@ -797,6 +810,46 @@ export async function removePhase(
   const next = removePhaseFromShape(state, phaseId)
   if (!next) return null
   await persistAssistState(ticket, next, 'remove_phase')
+  return next
+}
+
+// Pure helper: flip the `done` flag on one item in a phase's DoD. Used
+// by the per-phase DoD checklist UI so the user can tick items off
+// without going through the model. Returns null if the shape, phase, or
+// item id doesn't resolve. The item is identified by index — the model
+// returns these as ordered arrays without stable IDs.
+export function togglePhaseDodInShape(
+  state: AssistState,
+  phaseId: string,
+  itemIndex: number,
+): AssistState | null {
+  if (!state.shape) return null
+  const phaseIdx = state.shape.phases.findIndex((p) => p.id === phaseId)
+  if (phaseIdx === -1) return null
+  const phase = state.shape.phases[phaseIdx]
+  if (itemIndex < 0 || itemIndex >= phase.definition_of_done.length) return null
+  const nextDod = phase.definition_of_done.map((d, i) =>
+    i === itemIndex ? { ...d, done: !d.done } : d,
+  )
+  const nextPhases = state.shape.phases.map((p, i) =>
+    i === phaseIdx ? { ...p, definition_of_done: nextDod } : p,
+  )
+  return {
+    ...state,
+    shape: { ...state.shape, phases: nextPhases },
+  }
+}
+
+// Persisted wrapper for ticking a phase's DoD item on/off in the UI.
+export async function togglePhaseDodItem(
+  ticket: Ticket,
+  state: AssistState,
+  phaseId: string,
+  itemIndex: number,
+): Promise<AssistState | null> {
+  const next = togglePhaseDodInShape(state, phaseId, itemIndex)
+  if (!next) return null
+  await persistAssistState(ticket, next, 'toggle_phase_dod')
   return next
 }
 

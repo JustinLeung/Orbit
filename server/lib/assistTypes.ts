@@ -34,6 +34,8 @@ export type ShapePhaseStatus =
   | 'done'
   | 'blocked'
 
+export type PhaseDodItem = { item: string; done: boolean }
+
 export type ShapePhaseEntry = {
   id: string
   title: string
@@ -45,6 +47,10 @@ export type ShapePhaseEntry = {
   action: string | null
   // Optional clarification of the action ("Ask for May 18, capacity 80").
   action_details: string | null
+  // Per-phase DoD checklist. Required at shape time; later refine turns
+  // flip items to done. Defaults to [] for shapes persisted before this
+  // field existed.
+  definition_of_done: PhaseDodItem[]
 }
 
 // Optional adjacent steps the model thinks the user might want to add.

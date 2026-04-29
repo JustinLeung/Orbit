@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "seed": "tsx --env-file=.env scripts/seed.ts",
+    "eval:classifier": "tsx --env-file=.env scripts/eval-classifier.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
@@ -29,6 +30,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.14.2",
     "resend": "^4.0.0",
     "shadcn": "^4.6.0",

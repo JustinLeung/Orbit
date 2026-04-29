@@ -37,7 +37,8 @@ export const PHASE_PLAYBOOKS: Record<PhaseCategory, PhasePlaybook> = {
       'The work has scope, constraints, and concrete next moves written down.',
     specific_helps: [
       'For planning specifically, choice options should reflect common scoping splits (e.g. for a birthday party: "dinner at home / restaurant / activity-based / surprise event").',
-      'Once you have enough to write a concrete plan, propose a definition_of_done checklist that captures the scope and constraints, and refine the action.',
+      "Once you have enough to write a concrete plan, propose an OVERALL ticket-level definition_of_done checklist (via ticket_updates) that captures the scope and constraints, and refine the action.",
+      "Also tighten THIS phase's own definition_of_done so its checks reflect the scoping decisions just made.",
       'Surface unresolved scope/constraint unknowns the user could not answer as open_questions_to_add.',
       'When the plan is concrete enough to execute, set ready_to_advance: true.',
     ],
@@ -58,7 +59,7 @@ export const PHASE_PLAYBOOKS: Record<PhaseCategory, PhasePlaybook> = {
   doing: {
     completion: 'The artifact or output exists.',
     specific_helps: [
-      "Track definition_of_done progress: when the user mentions an item is done, output that item with done: true.",
+      "Track THIS phase's definition_of_done: when the user mentions an item is done, output that item with done: true on the phase. Do the same on the OVERALL ticket-level definition_of_done (via ticket_updates) when applicable.",
       'Capture blockers the user surfaces as open_questions_to_add.',
       'If the user mentions a deadline, set next_action_at (ISO 8601, never invented).',
     ],
@@ -80,7 +81,7 @@ export const PHASE_PLAYBOOKS: Record<PhaseCategory, PhasePlaybook> = {
   deciding: {
     completion: 'A choice has been made and the rationale is captured.',
     specific_helps: [
-      'Capture the live options + decision criteria as definition_of_done items ("evaluated against cost", "evaluated against speed").',
+      "Capture the live options + decision criteria as THIS phase's definition_of_done items (\"evaluated against cost\", \"evaluated against speed\"). Mirror to the overall ticket-level definition_of_done if the criteria belong on the whole ticket.",
       "Record the user's current leaning in context or position.notes.",
       "Once a choice + rationale is articulated, set ready_to_advance: true.",
     ],
@@ -90,7 +91,7 @@ export const PHASE_PLAYBOOKS: Record<PhaseCategory, PhasePlaybook> = {
   closing: {
     completion: 'All definition_of_done items are checked and nothing is left to capture.',
     specific_helps: [
-      'Walk remaining definition_of_done items and propose flipping each to done: true when the user confirms.',
+      "Walk remaining definition_of_done items — both THIS phase's and the overall ticket-level list — and propose flipping each to done: true when the user confirms.",
       "Surface anything worth archiving (lessons, links, contacts) as references_to_add.",
       "Suggest ticket status 'review' or 'closed' via ticket_updates when DoD is fully done.",
     ],

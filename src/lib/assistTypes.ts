@@ -38,6 +38,12 @@ export type ShapePhaseStatus =
   | 'done'
   | 'blocked'
 
+// Per-phase definition-of-done entry. Mirrors the ticket-level
+// `definition_of_done` jsonb shape so the UI can reuse the same checkbox
+// component, and so the playbooks (closing/doing/deciding) can talk
+// about "this phase's DoD" with the same vocabulary the ticket uses.
+export type PhaseDodItem = { item: string; done: boolean }
+
 export type ShapePhaseEntry = {
   id: string
   title: string
@@ -49,6 +55,11 @@ export type ShapePhaseEntry = {
   action: string | null
   // Optional clarification of the action ("Ask for May 18, capacity 80").
   action_details: string | null
+  // Concrete completion checks for THIS phase. The model is required to
+  // emit these during the initial shape turn so every phase has a
+  // verifiable "done" bar; later refine turns can flip items to done.
+  // Defaults to [] for shapes persisted before this field existed.
+  definition_of_done: PhaseDodItem[]
 }
 
 // Optional adjacent steps the model thinks the user might want to add.
