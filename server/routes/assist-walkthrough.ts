@@ -3,9 +3,16 @@ import { Type } from '@google/genai'
 import { getGemini, GEMINI_MODEL } from '../lib/gemini.js'
 import type {
   AssistPhase,
+  AssistQuestionKind,
   AssistState,
+  DynamicAssistQuestion,
+  PhaseCategory,
+  Shape,
+  SuggestedStep,
+  SuggestedStepPosition,
   TicketSnapshot,
 } from '../lib/assistTypes.js'
+import { formatPlaybookBlock } from '../lib/phasePlaybooks.js'
 
 const router = Router()
 
@@ -15,9 +22,14 @@ The walkthrough has TWO active phases the user moves between:
 
 1. **shape** — Look at the ticket and propose the WHOLE arc as a structured shape. The shape has:
     * goal — one sentence on what done looks like
-    * phases — 3-5 phases this naturally has, in order. Each phase is BOTH the arc-segment AND a concrete unit of work, so each phase carries exactly one \`action\` (a single imperative the user can do, e.g. "Email three venues for availability"). Phases ARE the action plan — there is no separate next-steps list.
+    * phases — the natural arc of the work, in order. **First decide if this is single-step or multi-step**, and BIAS TOWARD FEWER PHASES:
+        - **Single-step**: one concrete action the user does in one sitting. Examples: "Call mom", "Take out the trash", "Book a flight to NYC for Friday", "Change the lightbulb in the hallway", "Reply to Sam's email". For these emit EXACTLY 1 phase. Don't decompose — the user already knows what to do; they just want it tracked.
+        - **Multi-step**: tasks that genuinely have distinct sub-stages with handoffs, decisions, or waiting in between. Examples: "Plan my brother's 30th birthday", "Buy a Mother's Day gift", "Organize the team offsite dinner", "Hire a tutor for my kid". For these emit 3-5 phases.
+        - When in doubt, prefer FEWER phases. The user can add steps later if it grows.
+        Each phase is BOTH the arc-segment AND a concrete unit of work, so each phase carries exactly one \`action\` (a single imperative the user can do, e.g. "Email three venues for availability"). Phases ARE the action plan — there is no separate next-steps list.
     * completion_criteria — concrete signals the loop is done
     * inputs_needed — people, info, decisions required
+    * suggested_steps — 1-3 OPTIONAL adjacent steps a thoughtful user might want to add. These are NOT in \`phases\` (you've already biased toward the smallest plan); they're one-click additions the user can opt into. Each entry has: id (stable), title (imperative, short), category, rationale (one-line "why this might help"), position ('before' | 'after' | 'end'), anchor_phase_id (the existing phase id this step is relative to — REQUIRED for 'before'/'after', null for 'end'). Examples: for "Change lightbulb" → suggest "Buy lightbulb" with position 'before' anchored to the change phase, rationale "in case the bulb isn't on hand"; for "Buy a Mother's Day gift" → suggest "Wrap the gift" with position 'after'. NEVER duplicate a phase that's already in \`phases\` — these are *additional* options.
 
 2. **refine** — The user has clicked the phase they're in and given you context (typically as labelled answers to a few structured questions about that phase). Update THAT phase's \`action\` (and \`action_details\` if useful) so it reflects the user's current situation more concretely than the original generic action. You can also update its \`status\`, blockers, and notes. KEEP THE REST OF THE SHAPE STABLE unless something obvious has changed (e.g. user revealed an extra phase you missed).
 
@@ -30,21 +42,14 @@ A phase has:
 - action — REQUIRED. One concrete imperative the user can do for this phase. Always populate. After refine, this is what the user will likely set as their next_action.
 - action_details — optional clarification ("Ask for May 18, capacity 80")
 
-Phase categories (apply to phases AND inform tone):
-- "planning" — clarifying scope, breaking work down, mapping options before committing.
-- "research" — gathering info before you can act ("find out X").
-- "doing" — actively producing the thing (drafting, building, sending).
-- "waiting" — blocked on a person, deadline, or external event you can't move yourself.
-- "deciding" — choosing between options, making a call.
-- "closing" — final review, confirmation, wrap-up.
-
-Pick the category that best matches the *primary* nature of that phase's work.
+Phase categories (apply to phases AND inform tone): planning, research, doing, waiting, deciding, closing. Pick the one that best matches the *primary* nature of that phase's work. During refine, the prompt will include a "Playbook for the current phase" block that tells you what completion looks like for that category and which kinds of help to prioritize — follow it.
 
 Cross-cutting:
 - Conversational and warm. Reflect what you heard. Don't pile up questions.
 - "assistant_message" is what gets shown to the user this turn. Always present, always in your warm voice.
 - During shape: produce the whole shape. During refine: return an updated \`shape\` (the same phases with the current phase's action improved) AND an updated \`position\` if blockers/notes changed.
 - When you think the current phase is complete, set "ready_to_advance": true. This tells the client the loop can be marked done.
+- "next_question" — When you need information from the user that you can't infer from the ticket, emit ONE question instead of refining immediately. Object with: id (stable string), kind ('choice' | 'multi_select' | 'short_text' | 'long_text'), prompt (one-line question), options (REQUIRED for choice/multi_select; 2-5 plausible options drawn from the ticket's specifics), allow_other (optional boolean for choice/multi_select — adds an "Other (specify)" option), placeholder (optional, for short_text/long_text). PREFER 'choice' over text whenever you can list 2-5 plausible options. Use 'short_text' for names/dates/numbers. Use 'long_text' ONLY when the answer truly cannot fit a list (e.g. an explanation or constraint). Ask ONE question per turn — never stack. When you have enough info, omit next_question and produce/refine the shape instead. The user's previous answer (if any) is in the conversation log as a labelled Q/A.
 - "ticket_updates" — Actively capture concrete facts the user shares (dates, venues, names, links, decisions, deadlines, dress codes, etc.) into the right ticket fields each turn. Whenever the conversation gives you a confident value, include it. Be SURGICAL: only set a field when the value is genuinely better than what's on the ticket. NEVER overwrite the title. NEVER invent facts. Field guidance:
     * goal — set during shape phase if you've articulated a clear goal
     * description — 1-2 sentence summary of what this loop is about; refresh whenever there's meaningfully new info
@@ -104,6 +109,37 @@ const responseSchema = {
           type: Type.ARRAY,
           items: { type: Type.STRING },
         },
+        suggested_steps: {
+          type: Type.ARRAY,
+          nullable: true,
+          description:
+            '1-3 OPTIONAL adjacent steps a thoughtful user might want to add. Each carries an explicit position relative to an existing phase. Do NOT duplicate any existing phase.',
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              title: { type: Type.STRING },
+              category: {
+                type: Type.STRING,
+                enum: [
+                  'planning',
+                  'research',
+                  'doing',
+                  'waiting',
+                  'deciding',
+                  'closing',
+                ],
+              },
+              rationale: { type: Type.STRING, nullable: true },
+              position: {
+                type: Type.STRING,
+                enum: ['before', 'after', 'end'],
+              },
+              anchor_phase_id: { type: Type.STRING, nullable: true },
+            },
+            required: ['id', 'title', 'category', 'position'],
+          },
+        },
       },
       required: ['phases', 'completion_criteria', 'inputs_needed'],
     },
@@ -116,6 +152,28 @@ const responseSchema = {
         notes: { type: Type.STRING, nullable: true },
       },
       required: ['blockers'],
+    },
+    next_question: {
+      type: Type.OBJECT,
+      nullable: true,
+      description:
+        'A single follow-up question to ask the user before refining. Prefer choice/multi_select over text. Use long_text only when free-form is required.',
+      properties: {
+        id: { type: Type.STRING },
+        kind: {
+          type: Type.STRING,
+          enum: ['choice', 'multi_select', 'short_text', 'long_text'],
+        },
+        prompt: { type: Type.STRING },
+        options: {
+          type: Type.ARRAY,
+          nullable: true,
+          items: { type: Type.STRING },
+        },
+        allow_other: { type: Type.BOOLEAN, nullable: true },
+        placeholder: { type: Type.STRING, nullable: true },
+      },
+      required: ['id', 'kind', 'prompt'],
     },
     ticket_updates: {
       type: Type.OBJECT,
@@ -222,6 +280,7 @@ type ModelResponse = {
   ready_to_advance?: boolean | null
   shape?: AssistState['shape']
   position?: AssistState['position']
+  next_question?: DynamicAssistQuestion | null
   ticket_updates?: TicketUpdates | null
 }
 
@@ -343,6 +402,174 @@ function emptyState(): AssistState {
     shape: null,
     position: null,
     messages: [],
+    next_question: null,
+  }
+}
+
+// Normalized form used to detect "the model is asking the same thing
+// twice." Lowercase + strip non-alphanumerics + collapse whitespace.
+function normalizePrompt(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Pulls the labelled "Q: …" prompts out of the conversation log so we can
+// (a) show the model an explicit "already asked" list, and (b) drop any
+// next_question whose prompt repeats one already in that list. Both the
+// dynamic interview UI and the static structured-questions form emit user
+// messages shaped as `Q: <prompt>\nA: <answer>`, so this catches both.
+function extractAskedPrompts(
+  messages: AssistState['messages'],
+): Array<{ prompt: string; norm: string }> {
+  const seen = new Set<string>()
+  const out: Array<{ prompt: string; norm: string }> = []
+  for (const m of messages) {
+    if (m.role !== 'user') continue
+    for (const line of m.text.split('\n')) {
+      const match = line.match(/^Q:\s*(.+)$/)
+      if (!match) continue
+      const prompt = match[1].trim()
+      const norm = normalizePrompt(prompt)
+      if (!norm || seen.has(norm)) continue
+      seen.add(norm)
+      out.push({ prompt, norm })
+    }
+  }
+  return out
+}
+
+const QUESTION_KINDS: AssistQuestionKind[] = [
+  'choice',
+  'multi_select',
+  'short_text',
+  'long_text',
+]
+
+// Drops the question if required fields are missing or if a choice-kind
+// question doesn't have at least one option. Returning null lets the route
+// treat "no question" as the model deciding to refine instead of ask.
+function sanitizeNextQuestion(
+  raw: unknown,
+): DynamicAssistQuestion | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'string' || r.id.trim() === '') return null
+  if (typeof r.prompt !== 'string' || r.prompt.trim() === '') return null
+  if (typeof r.kind !== 'string' || !QUESTION_KINDS.includes(r.kind as AssistQuestionKind)) {
+    return null
+  }
+  const kind = r.kind as AssistQuestionKind
+  let options: string[] | null = null
+  if (Array.isArray(r.options)) {
+    const cleaned: string[] = []
+    for (const o of r.options) {
+      if (typeof o === 'string' && o.trim() !== '') cleaned.push(o.trim())
+    }
+    if (cleaned.length > 0) options = cleaned
+  }
+  if ((kind === 'choice' || kind === 'multi_select') && !options) {
+    return null
+  }
+  return {
+    id: r.id.trim(),
+    kind,
+    prompt: r.prompt.trim(),
+    options,
+    allow_other: typeof r.allow_other === 'boolean' ? r.allow_other : null,
+    placeholder:
+      typeof r.placeholder === 'string' && r.placeholder.trim() !== ''
+        ? r.placeholder.trim()
+        : null,
+  }
+}
+
+const PHASE_CATEGORY_VALUES: PhaseCategory[] = [
+  'planning',
+  'research',
+  'doing',
+  'waiting',
+  'deciding',
+  'closing',
+]
+const SUGGESTED_POSITIONS: SuggestedStepPosition[] = ['before', 'after', 'end']
+
+// Cleans the model's suggested_steps list: drops malformed entries,
+// dedupes by normalized title against itself AND against existing phase
+// titles in the same shape, and falls back to 'end' when an
+// anchor_phase_id doesn't resolve to a real phase. Returns at most 5
+// entries (the prompt asks for 1-3, but cap defensively).
+function sanitizeSuggestedSteps(
+  raw: unknown,
+  phases: ReadonlyArray<{ id: string; title: string }>,
+): SuggestedStep[] {
+  if (!Array.isArray(raw)) return []
+  const validPhaseIds = new Set(phases.map((p) => p.id))
+  const seenTitles = new Set(
+    phases.map((p) => p.title.trim().toLowerCase()),
+  )
+  const out: SuggestedStep[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.trim() === '') continue
+    if (typeof e.title !== 'string' || e.title.trim() === '') continue
+    const title = e.title.trim()
+    const titleKey = title.toLowerCase()
+    if (seenTitles.has(titleKey)) continue
+    if (
+      typeof e.category !== 'string' ||
+      !PHASE_CATEGORY_VALUES.includes(e.category as PhaseCategory)
+    ) {
+      continue
+    }
+    let position = e.position as SuggestedStepPosition
+    if (!SUGGESTED_POSITIONS.includes(position)) position = 'end'
+    let anchor: string | null =
+      typeof e.anchor_phase_id === 'string' && e.anchor_phase_id.trim() !== ''
+        ? e.anchor_phase_id.trim()
+        : null
+    // before/after with an anchor that isn't in the shape → fall back to end.
+    if (position !== 'end' && (!anchor || !validPhaseIds.has(anchor))) {
+      position = 'end'
+      anchor = null
+    }
+    if (position === 'end') anchor = null
+    out.push({
+      id: e.id.trim(),
+      title,
+      category: e.category as PhaseCategory,
+      rationale:
+        typeof e.rationale === 'string' && e.rationale.trim() !== ''
+          ? e.rationale.trim()
+          : null,
+      position,
+      anchor_phase_id: anchor,
+    })
+    seenTitles.add(titleKey)
+    if (out.length >= 5) break
+  }
+  return out
+}
+
+// Normalizes a shape coming back from the model so suggested_steps is
+// always present (even when the model omitted it) and validated. Old
+// persisted shapes also lack the field — use this when reading any Shape
+// from the wire.
+function normalizeShape(raw: Shape | null | undefined): Shape | null {
+  if (!raw) return null
+  const phases = Array.isArray(raw.phases) ? raw.phases : []
+  return {
+    goal: raw.goal ?? null,
+    phases,
+    completion_criteria: raw.completion_criteria ?? [],
+    inputs_needed: raw.inputs_needed ?? [],
+    suggested_steps: sanitizeSuggestedSteps(
+      (raw as { suggested_steps?: unknown }).suggested_steps,
+      phases,
+    ),
   }
 }
 
@@ -401,6 +628,38 @@ function buildPrompt(
   if (state.position) {
     lines.push('', 'Current position:', JSON.stringify(state.position, null, 2))
   }
+  // If the previous turn asked the user a structured question, the user's
+  // answer arrives as the new user_message. Surface the asked question so
+  // the model sees what was answered (the sanitizer cleared it on the
+  // stored state, but the prompt should still show what was just asked).
+  if (state.next_question) {
+    lines.push(
+      '',
+      'You just asked the user this question (their answer is the new user message):',
+      JSON.stringify(state.next_question, null, 2),
+    )
+  }
+  // Explicit "do NOT re-ask" list — the conversation log already contains
+  // these as Q/A pairs, but pulling them out as a labelled section makes
+  // it much harder for the model to repeat a question it already got an
+  // answer to.
+  const askedPrompts = extractAskedPrompts(state.messages)
+  if (askedPrompts.length > 0) {
+    lines.push('', 'Questions already asked in this phase (do NOT re-ask any of these — the user has already answered):')
+    for (const q of askedPrompts) lines.push(`- ${q.prompt}`)
+  }
+  // During refine, splice in the per-category playbook for the phase the
+  // user has selected. Skipped during shape (no current phase yet) and
+  // skipped if the position points at a phase id that doesn't resolve in
+  // the current shape (defensive — shouldn't happen, but don't crash).
+  if (state.phase === 'refine' && state.shape && state.position?.current_phase_id) {
+    const current = state.shape.phases.find(
+      (p) => p.id === state.position!.current_phase_id,
+    )
+    if (current) {
+      lines.push('', formatPlaybookBlock(current.category, current.title))
+    }
+  }
   if (state.messages.length > 0) {
     lines.push('', 'Conversation so far:')
     for (const m of state.messages) {
@@ -412,7 +671,7 @@ function buildPrompt(
   } else if (state.messages.length === 0 && !advanced) {
     lines.push(
       '',
-      'No user message yet — propose an initial shape from the ticket alone, with each phase carrying a sensible default action.',
+      'No user message yet — propose an initial shape from the ticket alone. First classify: is this a single-step task (call X, take out trash, book a flight) or a multi-step task with distinct stages (plan a party, buy a gift, organize an event)? Emit 1 phase for single-step, 3-5 for multi-step. Bias toward fewer phases — the user can add steps later. Each phase carries a sensible default action.',
     )
   }
   return lines.join('\n')
@@ -452,6 +711,7 @@ router.post('/', async (req, res) => {
           ts: new Date().toISOString(),
         },
       ],
+      next_question: null,
     }
     return res.json({
       state: finalState,
@@ -523,9 +783,24 @@ router.post('/', async (req, res) => {
     // initial generation. Either way, take what the model returned if
     // present, otherwise carry forward.
     const phase = activeState.phase
+    const carriedShape = parsed.shape
+      ? normalizeShape(parsed.shape)
+      : (activeState.shape ?? null)
+    let nextQuestion = sanitizeNextQuestion(parsed.next_question)
+    // Drop a re-asked question. The model has the "do NOT re-ask" list in
+    // the prompt, but defense-in-depth: if it slips through, force the
+    // turn to be a refine instead of asking the same thing again.
+    if (nextQuestion) {
+      const askedNorms = new Set(
+        extractAskedPrompts(messagesWithUser).map((q) => q.norm),
+      )
+      if (askedNorms.has(normalizePrompt(nextQuestion.prompt))) {
+        nextQuestion = null
+      }
+    }
     const nextState: AssistState = {
       phase,
-      shape: parsed.shape ?? activeState.shape,
+      shape: carriedShape,
       position: parsed.position ?? activeState.position,
       messages: [
         ...messagesWithUser,
@@ -535,6 +810,7 @@ router.post('/', async (req, res) => {
           ts: new Date().toISOString(),
         },
       ],
+      next_question: nextQuestion,
     }
 
     return res.json({
@@ -542,6 +818,7 @@ router.post('/', async (req, res) => {
       assistant_message: assistantMessage,
       ready_to_advance: parsed.ready_to_advance === true,
       ticket_updates: sanitizeTicketUpdates(parsed.ticket_updates),
+      next_question: nextQuestion,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

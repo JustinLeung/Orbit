@@ -47,11 +47,32 @@ export type ShapePhaseEntry = {
   action_details: string | null
 }
 
+// Optional adjacent steps the model thinks the user might want to add.
+// Surfaced as one-click chips in the plan rail; clicking inserts at the
+// declared position. The model emits these alongside the main phases so
+// the user gets common suggestions ("Buy lightbulb" before "Change
+// lightbulb") without the assistant having to over-decompose by default.
+export type SuggestedStepPosition = 'before' | 'after' | 'end'
+
+export type SuggestedStep = {
+  id: string
+  title: string
+  category: PhaseCategory
+  rationale: string | null
+  position: SuggestedStepPosition
+  // Required when position is 'before' or 'after'. Must reference a phase
+  // id in the same shape; otherwise the sanitizer falls back to 'end'.
+  anchor_phase_id: string | null
+}
+
 export type Shape = {
   goal: string | null
   phases: ShapePhaseEntry[]
   completion_criteria: string[]
   inputs_needed: string[]
+  // 1-3 optional adjacent steps. Stable across non-shape turns; the model
+  // re-emits the full list whenever it returns a `shape`.
+  suggested_steps: SuggestedStep[]
 }
 
 export type Position = {
@@ -60,11 +81,37 @@ export type Position = {
   notes: string | null
 }
 
+// Kinds of input the model can ask the user for in a one-at-a-time
+// interview. Multiple choice ('choice'/'multi_select') is preferred so the
+// user picks instead of types. Free-form 'long_text' is a last resort.
+export type AssistQuestionKind =
+  | 'choice'
+  | 'multi_select'
+  | 'short_text'
+  | 'long_text'
+
+export type DynamicAssistQuestion = {
+  id: string
+  kind: AssistQuestionKind
+  prompt: string
+  // Required for 'choice' and 'multi_select'. Should be 2-5 options.
+  options?: string[] | null
+  // For 'choice'/'multi_select' — when true, the UI also offers an
+  // "Other (specify)" free-form input.
+  allow_other?: boolean | null
+  // Placeholder for 'short_text' / 'long_text'.
+  placeholder?: string | null
+}
+
 export type AssistState = {
   phase: AssistPhase
   shape: Shape | null
   position: Position | null
   messages: AssistMessage[]
+  // The model's pending question for the user, if any. Currently only
+  // populated for planning-category phases — that playbook tells the model
+  // to interview rather than refine immediately.
+  next_question: DynamicAssistQuestion | null
 }
 
 export type TicketReferenceKind =

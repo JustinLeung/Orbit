@@ -49,7 +49,7 @@ Each `pages/*.tsx` file is the same shape:
 
 Because hooks listen to `orbit:tickets-changed`, mutating from anywhere — sidebar create, detail dialog inline edit, assist panel — reflows the visible list automatically.
 
-`StuckPage` is the one page with a non-trivial query: it pulls `active`/`waiting`/`review` rows and filters in JS for the three "stuck" cases (`useStuckTickets` in `src/lib/queries.ts:144-176`). The filter is intentionally JS-side so the rules read top-to-bottom against `PLAN.md` § Stuck.
+`StuckPage` is the one page with a non-trivial query: it pulls `active`/`waiting`/`review` rows and filters in JS for the three "stuck" cases (`useStuckTickets` in `src/lib/queries.ts:144-176`). The filter is intentionally JS-side so the rules read top-to-bottom.
 
 ## Ticket capture, hoisted globally
 

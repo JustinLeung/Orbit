@@ -297,6 +297,291 @@ describe('runAssistTurn — dedup + failure handling', () => {
   })
 })
 
+describe('appendPhaseToShape (Add a step)', () => {
+  function stateWithPhases(ids: string[]) {
+    return {
+      phase: 'shape' as const,
+      shape: {
+        goal: null,
+        phases: ids.map((id) => ({
+          id,
+          title: id,
+          description: null,
+          status: 'not_started' as const,
+          category: 'doing' as const,
+          action: id,
+          action_details: null,
+        })),
+        completion_criteria: [],
+        inputs_needed: [],
+        suggested_steps: [],
+      },
+      position: null,
+      messages: [],
+      next_question: null,
+    }
+  }
+
+  it('appends a phase with default category doing and action = title', async () => {
+    const { appendPhaseToShape } = await import('./queries')
+    const next = appendPhaseToShape(stateWithPhases([]), { title: 'Confirm with Sam' })
+    expect(next?.shape?.phases).toHaveLength(1)
+    expect(next?.shape?.phases[0]).toMatchObject({
+      title: 'Confirm with Sam',
+      action: 'Confirm with Sam',
+      category: 'doing',
+      status: 'not_started',
+      description: null,
+      action_details: null,
+    })
+    expect(next?.shape?.phases[0].id).toMatch(/^user-/)
+  })
+
+  it('honors a user-selected category', async () => {
+    const { appendPhaseToShape } = await import('./queries')
+    const next = appendPhaseToShape(stateWithPhases([]), {
+      title: 'Decide vendor',
+      category: 'deciding',
+    })
+    expect(next?.shape?.phases[0].category).toBe('deciding')
+  })
+
+  it('generates a fresh id that does not collide with existing user-N ids', async () => {
+    const { appendPhaseToShape } = await import('./queries')
+    const next = appendPhaseToShape(stateWithPhases(['p1', 'user-1', 'user-2']), {
+      title: 'Another',
+    })
+    expect(next?.shape?.phases.at(-1)?.id).toBe('user-3')
+  })
+
+  it('returns null if the shape is missing or the title is whitespace', async () => {
+    const { appendPhaseToShape } = await import('./queries')
+    const noShape = {
+      phase: 'shape' as const,
+      shape: null,
+      position: null,
+      messages: [],
+      next_question: null,
+    }
+    expect(appendPhaseToShape(noShape, { title: 'X' })).toBeNull()
+    expect(appendPhaseToShape(stateWithPhases([]), { title: '   ' })).toBeNull()
+  })
+
+  it('preserves existing phases (append-only)', async () => {
+    const { appendPhaseToShape } = await import('./queries')
+    const next = appendPhaseToShape(stateWithPhases(['p1', 'p2']), { title: 'Third' })
+    expect(next?.shape?.phases.map((p) => p.id)).toEqual(['p1', 'p2', expect.stringMatching(/^user-/)])
+    // Untouched phases are exactly the same reference-wise (or at least content-wise).
+    expect(next?.shape?.phases[0].title).toBe('p1')
+    expect(next?.shape?.phases[1].title).toBe('p2')
+  })
+})
+
+describe('insertPhaseAtPosition (Suggested step accept)', () => {
+  function stateWithPhases(ids: string[]) {
+    return {
+      phase: 'shape' as const,
+      shape: {
+        goal: null,
+        phases: ids.map((id) => ({
+          id,
+          title: id,
+          description: null,
+          status: 'not_started' as const,
+          category: 'doing' as const,
+          action: id,
+          action_details: null,
+        })),
+        completion_criteria: [],
+        inputs_needed: [],
+        suggested_steps: [],
+      },
+      position: null,
+      messages: [],
+      next_question: null,
+    }
+  }
+
+  it('inserts BEFORE the anchor phase', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1', 'p2', 'p3']),
+      { title: 'Buy lightbulb' },
+      { kind: 'before', anchor_phase_id: 'p2' },
+    )
+    expect(next?.shape?.phases.map((p) => p.title)).toEqual([
+      'p1',
+      'Buy lightbulb',
+      'p2',
+      'p3',
+    ])
+  })
+
+  it('inserts AFTER the anchor phase', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1', 'p2', 'p3']),
+      { title: 'Wrap gift' },
+      { kind: 'after', anchor_phase_id: 'p2' },
+    )
+    expect(next?.shape?.phases.map((p) => p.title)).toEqual([
+      'p1',
+      'p2',
+      'Wrap gift',
+      'p3',
+    ])
+  })
+
+  it('appends at the END when position is end', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1']),
+      { title: 'Final touches' },
+      { kind: 'end' },
+    )
+    expect(next?.shape?.phases.map((p) => p.title)).toEqual([
+      'p1',
+      'Final touches',
+    ])
+  })
+
+  it('falls back to END when the anchor id does not resolve', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1', 'p2']),
+      { title: 'Orphan suggestion' },
+      { kind: 'before', anchor_phase_id: 'gone' },
+    )
+    expect(next?.shape?.phases.map((p) => p.title)).toEqual([
+      'p1',
+      'p2',
+      'Orphan suggestion',
+    ])
+  })
+
+  it('honors a model-provided id when it does not collide', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1']),
+      { id: 's1', title: 'From suggestion' },
+      { kind: 'end' },
+    )
+    expect(next?.shape?.phases.at(-1)?.id).toBe('s1')
+  })
+
+  it('generates a user-N id when the model id collides with existing phase id', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const next = insertPhaseAtPosition(
+      stateWithPhases(['p1', 'user-1']),
+      { id: 'p1', title: 'Wants colliding id' },
+      { kind: 'end' },
+    )
+    const last = next?.shape?.phases.at(-1)
+    expect(last?.id).toBe('user-2')
+  })
+
+  it('returns null when the shape is missing or title is whitespace', async () => {
+    const { insertPhaseAtPosition } = await import('./queries')
+    const noShape = {
+      phase: 'shape' as const,
+      shape: null,
+      position: null,
+      messages: [],
+      next_question: null,
+    }
+    expect(
+      insertPhaseAtPosition(noShape, { title: 'X' }, { kind: 'end' }),
+    ).toBeNull()
+    expect(
+      insertPhaseAtPosition(stateWithPhases(['p1']), { title: '  ' }, {
+        kind: 'end',
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('removePhaseFromShape', () => {
+  function stateWith(ids: string[], opts?: { current?: string; nextQ?: boolean }) {
+    return {
+      phase: 'shape' as const,
+      shape: {
+        goal: null,
+        phases: ids.map((id) => ({
+          id,
+          title: id,
+          description: null,
+          status: 'not_started' as const,
+          category: 'doing' as const,
+          action: id,
+          action_details: null,
+        })),
+        completion_criteria: [],
+        inputs_needed: [],
+        suggested_steps: [],
+      },
+      position: opts?.current
+        ? { current_phase_id: opts.current, blockers: [], notes: null }
+        : null,
+      messages: [],
+      next_question: opts?.nextQ
+        ? {
+            id: 'q1',
+            kind: 'short_text' as const,
+            prompt: 'huh?',
+            options: null,
+            allow_other: null,
+            placeholder: null,
+          }
+        : null,
+    }
+  }
+
+  it('removes a phase by id and preserves the order of the rest', async () => {
+    const { removePhaseFromShape } = await import('./queries')
+    const next = removePhaseFromShape(stateWith(['p1', 'p2', 'p3']), 'p2')
+    expect(next?.shape?.phases.map((p) => p.id)).toEqual(['p1', 'p3'])
+  })
+
+  it('returns null when the id does not resolve', async () => {
+    const { removePhaseFromShape } = await import('./queries')
+    expect(
+      removePhaseFromShape(stateWith(['p1']), 'gone'),
+    ).toBeNull()
+  })
+
+  it('returns null when no shape is present', async () => {
+    const { removePhaseFromShape } = await import('./queries')
+    const noShape = {
+      phase: 'shape' as const,
+      shape: null,
+      position: null,
+      messages: [],
+      next_question: null,
+    }
+    expect(removePhaseFromShape(noShape, 'p1')).toBeNull()
+  })
+
+  it('clears current_phase_id and next_question when removing the current phase', async () => {
+    const { removePhaseFromShape } = await import('./queries')
+    const next = removePhaseFromShape(
+      stateWith(['p1', 'p2'], { current: 'p2', nextQ: true }),
+      'p2',
+    )
+    expect(next?.position?.current_phase_id).toBeNull()
+    expect(next?.next_question).toBeNull()
+  })
+
+  it('keeps current_phase_id and next_question when removing a different phase', async () => {
+    const { removePhaseFromShape } = await import('./queries')
+    const next = removePhaseFromShape(
+      stateWith(['p1', 'p2'], { current: 'p1', nextQ: true }),
+      'p2',
+    )
+    expect(next?.position?.current_phase_id).toBe('p1')
+    expect(next?.next_question).not.toBeNull()
+  })
+})
+
 describe('addTicketNote', () => {
   it('inserts a note_added event with trimmed body and notifies listeners', async () => {
     const insert = vi.fn().mockReturnValue({

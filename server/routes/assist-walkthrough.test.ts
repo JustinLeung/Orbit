@@ -399,6 +399,560 @@ describe('POST /api/assist/walkthrough', () => {
     expect(promptText).toContain('https://example.test/spec')
   })
 
+  describe('suggested_steps wire passthrough', () => {
+    function shapeWithSuggestions(overrides: unknown) {
+      return {
+        goal: 'x',
+        phases: [
+          {
+            id: 'p1',
+            title: 'Change lightbulb',
+            description: null,
+            status: 'not_started',
+            category: 'doing',
+            action: 'Change the bulb',
+          },
+        ],
+        completion_criteria: [],
+        inputs_needed: [],
+        suggested_steps: overrides,
+      }
+    }
+
+    async function postShape(suggestions: unknown) {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'shape ready',
+          shape: shapeWithSuggestions(suggestions),
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      return res
+    }
+
+    it('passes valid suggestions through to state.shape.suggested_steps', async () => {
+      const res = await postShape([
+        {
+          id: 's1',
+          title: 'Buy lightbulb',
+          category: 'doing',
+          rationale: 'in case the bulb is dead',
+          position: 'before',
+          anchor_phase_id: 'p1',
+        },
+      ])
+      expect(res.status).toBe(200)
+      expect(res.body.state.shape.suggested_steps).toEqual([
+        {
+          id: 's1',
+          title: 'Buy lightbulb',
+          category: 'doing',
+          rationale: 'in case the bulb is dead',
+          position: 'before',
+          anchor_phase_id: 'p1',
+        },
+      ])
+    })
+
+    it('falls back to position=end when anchor_phase_id does not resolve', async () => {
+      const res = await postShape([
+        {
+          id: 's1',
+          title: 'Test the new bulb',
+          category: 'doing',
+          position: 'after',
+          anchor_phase_id: 'phase-that-does-not-exist',
+        },
+      ])
+      const s = res.body.state.shape.suggested_steps[0]
+      expect(s.position).toBe('end')
+      expect(s.anchor_phase_id).toBeNull()
+    })
+
+    it('drops a suggestion that duplicates an existing phase title (case-insensitive)', async () => {
+      const res = await postShape([
+        {
+          id: 's1',
+          title: 'change lightbulb',
+          category: 'doing',
+          position: 'end',
+        },
+        {
+          id: 's2',
+          title: 'Buy lightbulb',
+          category: 'doing',
+          position: 'before',
+          anchor_phase_id: 'p1',
+        },
+      ])
+      const titles = res.body.state.shape.suggested_steps.map(
+        (s: { title: string }) => s.title,
+      )
+      expect(titles).toEqual(['Buy lightbulb'])
+    })
+
+    it('drops malformed entries (missing required fields, bad category)', async () => {
+      const res = await postShape([
+        { id: '', title: 'x', category: 'doing', position: 'end' },
+        { id: 's2', title: '   ', category: 'doing', position: 'end' },
+        { id: 's3', title: 'Bad cat', category: 'rambling', position: 'end' },
+        { id: 's4', title: 'OK', category: 'doing', position: 'end' },
+      ])
+      const ss = res.body.state.shape.suggested_steps
+      expect(ss).toHaveLength(1)
+      expect(ss[0]).toMatchObject({ id: 's4', title: 'OK', position: 'end' })
+    })
+
+    it('caps suggested_steps at 5 entries', async () => {
+      const many = Array.from({ length: 8 }, (_, i) => ({
+        id: `s${i}`,
+        title: `Suggestion ${i}`,
+        category: 'doing',
+        position: 'end',
+      }))
+      const res = await postShape(many)
+      expect(res.body.state.shape.suggested_steps.length).toBe(5)
+    })
+
+    it('defaults suggested_steps to [] when the model omits the field', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          shape: {
+            goal: null,
+            phases: [],
+            completion_criteria: [],
+            inputs_needed: [],
+            // suggested_steps omitted
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      expect(res.body.state.shape.suggested_steps).toEqual([])
+    })
+
+    it('system prompt teaches the model to emit optional adjacent steps', async () => {
+      // We don't hit the model; we just assert the systemInstruction passed
+      // to the SDK contains the suggested_steps contract. Generation config
+      // is what gets passed; let's check the call.
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      await request(app).post('/api/assist/walkthrough').send({ ticket: TICKET })
+      const call = generateContent.mock.calls[0][0]
+      const systemInstruction = call.config.systemInstruction as string
+      expect(systemInstruction).toContain('suggested_steps')
+      expect(systemInstruction).toContain('Buy lightbulb')
+      expect(systemInstruction).toContain('NEVER duplicate')
+    })
+  })
+
+  describe('per-category playbook injection', () => {
+    function shapeWithCategory(category: string) {
+      return {
+        goal: 'x',
+        phases: [
+          {
+            id: 'p1',
+            title: 'P1',
+            description: null,
+            status: 'in_progress' as const,
+            category,
+            action: 'placeholder',
+          },
+        ],
+        completion_criteria: [],
+        inputs_needed: [],
+      }
+    }
+
+    async function callRefine(category: string) {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: shapeWithCategory(category),
+            position: { current_phase_id: 'p1', blockers: [], notes: null },
+            messages: [],
+          },
+          user_message: 'context',
+        })
+      return generateContent.mock.calls.at(-1)![0].contents as string
+    }
+
+    it('research → prompt mentions "good enough" and references/open_questions hints', async () => {
+      const prompt = await callRefine('research')
+      expect(prompt).toContain('Playbook for the current phase')
+      expect(prompt).toContain('good enough')
+      expect(prompt).toContain('references_to_add')
+      expect(prompt).toContain('open_questions_to_add')
+    })
+
+    it('waiting → prompt mentions nudge + next_action_at hint', async () => {
+      const prompt = await callRefine('waiting')
+      expect(prompt).toContain('Playbook for the current phase')
+      expect(prompt.toLowerCase()).toContain('nudge')
+      expect(prompt).toContain('next_action_at')
+    })
+
+    it('closing → prompt mentions DoD-flip + status review/closed', async () => {
+      const prompt = await callRefine('closing')
+      expect(prompt).toContain('Playbook for the current phase')
+      expect(prompt).toContain('definition_of_done')
+      expect(prompt).toMatch(/review|closed/)
+    })
+
+    it('planning → prompt mentions next_question, one-at-a-time, and choice/short_text/long_text', async () => {
+      const prompt = await callRefine('planning')
+      expect(prompt).toContain('Playbook for the current phase')
+      expect(prompt).toContain('next_question')
+      expect(prompt.toLowerCase()).toContain('one question per turn')
+      expect(prompt).toContain('choice')
+      expect(prompt).toContain('short_text')
+      expect(prompt).toContain('long_text')
+    })
+
+    it('deciding → prompt mentions options/criteria and ready_to_advance', async () => {
+      const prompt = await callRefine('deciding')
+      expect(prompt).toContain('Playbook for the current phase')
+      expect(prompt.toLowerCase()).toContain('options')
+      expect(prompt).toContain('ready_to_advance')
+    })
+
+    it('bootstrap (no state) → prompt instructs single-step vs multi-step classification, biased to fewer', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      const promptText = generateContent.mock.calls[0][0].contents as string
+      // bootstrap-only line in buildPrompt
+      expect(promptText).toContain('single-step task')
+      expect(promptText).toContain('multi-step task')
+      expect(promptText).toContain('1 phase for single-step')
+      expect(promptText).toContain('3-5 for multi-step')
+      expect(promptText.toLowerCase()).toContain('bias toward fewer')
+    })
+
+    it('shape phase → no playbook block in prompt', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      const prompt = generateContent.mock.calls[0][0].contents as string
+      expect(prompt).not.toContain('Playbook for the current phase')
+    })
+
+    it('opting a non-planning category into interview: true flows the hints into the prompt', async () => {
+      const { PHASE_PLAYBOOKS } = await import('../lib/phasePlaybooks.js')
+      const previous = PHASE_PLAYBOOKS.deciding.interview
+      PHASE_PLAYBOOKS.deciding.interview = true
+      try {
+        const prompt = await callRefine('deciding')
+        expect(prompt).toContain('Playbook for the current phase')
+        // The shared INTERVIEW_HINTS block now renders for deciding too.
+        expect(prompt).toContain('next_question')
+        expect(prompt.toLowerCase()).toContain('one question per turn')
+        expect(prompt).toMatch(/never re-ask/i)
+      } finally {
+        PHASE_PLAYBOOKS.deciding.interview = previous
+      }
+    })
+
+    it('refine with unresolved current_phase_id → no playbook block, no crash', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: shapeWithCategory('doing'),
+            position: { current_phase_id: 'does-not-exist', blockers: [], notes: null },
+            messages: [],
+          },
+        })
+      expect(res.status).toBe(200)
+      const prompt = generateContent.mock.calls[0][0].contents as string
+      expect(prompt).not.toContain('Playbook for the current phase')
+    })
+  })
+
+  describe('next_question wire passthrough', () => {
+    it('passes a valid choice question through to state and top-level', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'A quick question to nail down scope.',
+          next_question: {
+            id: 'q_size',
+            kind: 'choice',
+            prompt: 'How many people are you planning for?',
+            options: ['Under 10', '10-25', '25-50', '50+'],
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET })
+      expect(res.body.next_question).toMatchObject({
+        id: 'q_size',
+        kind: 'choice',
+        options: ['Under 10', '10-25', '25-50', '50+'],
+      })
+      expect(res.body.state.next_question).toMatchObject({ id: 'q_size' })
+    })
+
+    it('drops a choice question with no options', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          next_question: {
+            id: 'q1',
+            kind: 'choice',
+            prompt: 'Pick one',
+            // missing options
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET })
+      expect(res.body.next_question).toBeNull()
+      expect(res.body.state.next_question).toBeNull()
+    })
+
+    it('drops a question with empty prompt or unknown kind', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          next_question: { id: 'q1', kind: 'rambling', prompt: 'hi' },
+        }),
+      })
+      const app = await makeApp()
+      const res1 = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET })
+      expect(res1.body.next_question).toBeNull()
+
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          next_question: { id: 'q2', kind: 'short_text', prompt: '   ' },
+        }),
+      })
+      const res2 = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET })
+      expect(res2.body.next_question).toBeNull()
+    })
+
+    it('passes short_text without options through cleanly', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'one more thing',
+          next_question: {
+            id: 'q_when',
+            kind: 'short_text',
+            prompt: 'When is the deadline?',
+            placeholder: 'e.g. May 18',
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET })
+      expect(res.body.next_question).toMatchObject({
+        kind: 'short_text',
+        placeholder: 'e.g. May 18',
+      })
+    })
+
+    it('drops a duplicate question whose prompt was already asked-and-answered', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'one more!',
+          next_question: {
+            id: 'q_again',
+            kind: 'choice',
+            // Same prompt, different punctuation/case → still a duplicate.
+            prompt: 'how many people are you planning for',
+            options: ['Under 10', '10-25'],
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: null,
+            position: null,
+            messages: [
+              {
+                role: 'user',
+                text: 'Q: How many people are you planning for?\nA: Under 10',
+                ts: '2026-04-29T00:00:00Z',
+              },
+            ],
+            next_question: null,
+          },
+        })
+      expect(res.body.next_question).toBeNull()
+      expect(res.body.state.next_question).toBeNull()
+    })
+
+    it('keeps a non-duplicate question even when others have been asked', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'next thing',
+          next_question: {
+            id: 'q_when',
+            kind: 'short_text',
+            prompt: 'When is the deadline?',
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: null,
+            position: null,
+            messages: [
+              {
+                role: 'user',
+                text: 'Q: How many people?\nA: Under 10',
+                ts: '2026-04-29T00:00:00Z',
+              },
+            ],
+            next_question: null,
+          },
+        })
+      expect(res.body.next_question).toMatchObject({ id: 'q_when' })
+    })
+
+    it('prompt lists already-asked questions as a "do NOT re-ask" block', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'noted' }),
+      })
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: null,
+            position: null,
+            messages: [
+              {
+                role: 'user',
+                text: 'Q: How many people?\nA: 25',
+                ts: '2026-04-29T00:00:00Z',
+              },
+              {
+                role: 'user',
+                text: 'Q: What is the budget?\nA: $1000',
+                ts: '2026-04-29T00:01:00Z',
+              },
+            ],
+            next_question: null,
+          },
+        })
+      const promptText = generateContent.mock.calls[0][0].contents as string
+      expect(promptText).toContain('Questions already asked')
+      expect(promptText).toContain('do NOT re-ask')
+      expect(promptText).toContain('How many people?')
+      expect(promptText).toContain('What is the budget?')
+    })
+
+    it('surfaces the previously-asked question in the prompt to the model', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'noted' }),
+      })
+      const app = await makeApp()
+      await request(app)
+        .post('/api/assist/walkthrough')
+        .send({
+          ticket: TICKET,
+          state: {
+            phase: 'refine',
+            shape: {
+              goal: null,
+              phases: [
+                {
+                  id: 'p1',
+                  title: 'Plan it',
+                  description: null,
+                  status: 'in_progress',
+                  category: 'planning',
+                  action: 'placeholder',
+                },
+              ],
+              completion_criteria: [],
+              inputs_needed: [],
+            },
+            position: { current_phase_id: 'p1', blockers: [], notes: null },
+            messages: [],
+            next_question: {
+              id: 'q_size',
+              kind: 'choice',
+              prompt: 'How many people?',
+              options: ['Under 10', '10-25'],
+            },
+          },
+          user_message: 'Under 10',
+        })
+      const promptText = generateContent.mock.calls[0][0].contents as string
+      expect(promptText).toContain('You just asked the user this question')
+      expect(promptText).toContain('How many people?')
+    })
+  })
+
   it('refine phase: takes updated shape from model and carries position forward', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({

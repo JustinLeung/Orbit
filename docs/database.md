@@ -2,7 +2,7 @@
 
 Schema lives entirely in `supabase/migrations/`, versioned and applied by `supabase db reset` (rebuilds from scratch) or `supabase start` (applies new ones to a running stack). All eight user-facing tables are scoped by `user_id` with RLS so the same schema works single-user (Justin) or multi-user later, with no fork.
 
-For the canonical field list per table, see `PLAN.md` § Core Data Models. This doc covers operational concerns: what's in each migration, how RLS is shaped, the onboarding seed RPC, and the dev seed script.
+This doc covers operational concerns: what's in each migration, how RLS is shaped, the onboarding seed RPC, and the dev seed script. The canonical field list per table lives in the migrations themselves under `supabase/migrations/`.
 
 ## Tables
 

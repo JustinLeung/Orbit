@@ -2,7 +2,7 @@
 
 A ticket is the only first-class object in Orbit: every commitment lives in `tickets`. This doc covers the ticket lifecycle, the detail dialog, status transitions, the append-only history, and the structured context fields that hang off every ticket.
 
-> See [`PLAN.md`](../PLAN.md) for the canonical field list and the rationale behind each ticket type/status.
+> The canonical field list per table lives in the migrations under `supabase/migrations/`; see [`./database.md`](./database.md) for the operational view.
 
 ## Lifecycle at a glance
 
