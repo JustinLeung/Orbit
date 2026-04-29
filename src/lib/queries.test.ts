@@ -65,6 +65,7 @@ function baseTicket(overrides: Partial<Ticket> = {}): Ticket {
     updated_at: now,
     closed_at: null,
     definition_of_done: [],
+    short_id: 1,
     ...overrides,
   }
 }

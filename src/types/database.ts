@@ -331,6 +331,7 @@ export type Database = {
           importance: number | null
           next_action: string | null
           next_action_at: string | null
+          short_id: number
           status: Database["public"]["Enums"]["ticket_status"]
           title: string
           type: Database["public"]["Enums"]["ticket_type"]
@@ -354,6 +355,7 @@ export type Database = {
           importance?: number | null
           next_action?: string | null
           next_action_at?: string | null
+          short_id?: number
           status?: Database["public"]["Enums"]["ticket_status"]
           title: string
           type?: Database["public"]["Enums"]["ticket_type"]
@@ -377,6 +379,7 @@ export type Database = {
           importance?: number | null
           next_action?: string | null
           next_action_at?: string | null
+          short_id?: number
           status?: Database["public"]["Enums"]["ticket_status"]
           title?: string
           type?: Database["public"]["Enums"]["ticket_type"]

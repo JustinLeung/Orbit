@@ -160,7 +160,7 @@ export function TicketDetailDialog({
                       }}
                     />
                     <span className="text-xs text-muted-foreground">
-                      ORB-{editing.id.slice(0, 6).toUpperCase()}
+                      #{editing.short_id}
                     </span>
                   </div>
                   <div className="flex items-center gap-1">

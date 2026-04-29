@@ -204,7 +204,7 @@ function TicketRow({
 
       {/* ID — Linear-style monospaced prefix */}
       <span className="hidden w-[68px] shrink-0 font-mono text-[11px] text-muted-foreground md:inline">
-        ORB-{ticket.id.slice(0, 6).toUpperCase()}
+        #{ticket.short_id}
       </span>
 
       {/* Title + sub-line */}

@@ -46,6 +46,7 @@ Do not build full automation, external integrations, or autonomous agents yet.
 Fields:
 
 - `id`
+- `short_id` (per-user sequential integer; surfaced in the UI as `#N`)
 - `title`
 - `description`
 - `type`
