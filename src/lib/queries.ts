@@ -740,6 +740,15 @@ export async function updateTicket(
   return ticket
 }
 
+// Hard-delete a ticket. Related rows (events, open questions, references,
+// agent_runs, sub-issues) cascade via the ON DELETE CASCADE FKs set in
+// migration 20260428205127.
+export async function deleteTicket(id: string): Promise<void> {
+  const { error } = await supabase.from('tickets').delete().eq('id', id)
+  if (error) throw error
+  notifyTicketsChanged()
+}
+
 // ── ticket_open_questions ────────────────────────────────────────────────
 
 const OPEN_QUESTIONS_CHANGED_EVENT = 'orbit:open-questions-changed'
