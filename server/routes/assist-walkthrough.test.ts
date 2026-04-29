@@ -275,6 +275,77 @@ describe('POST /api/assist/walkthrough', () => {
     expect(res.body.state.shape.phases[1].category).toBe('waiting')
   })
 
+  it('passes through definition_of_done, open_questions_to_add, references_to_add', async () => {
+    process.env.GEMINI_API_KEY = 'k'
+    generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({
+        assistant_message: 'Captured the structure.',
+        ticket_updates: {
+          definition_of_done: [
+            { item: 'Pull last year actuals', done: false },
+            { item: 'Sam approves the numbers', done: false },
+          ],
+          open_questions_to_add: [
+            'Is the freeze date still in effect?',
+            '   ', // whitespace-only — should be dropped
+          ],
+          references_to_add: [
+            { kind: 'link', url_or_text: 'https://docs.example/q3', label: 'Q3 doc' },
+            { kind: 'invalid', url_or_text: 'should be skipped' }, // bad kind — dropped
+            { kind: 'snippet', url_or_text: '   ' }, // empty body — dropped
+          ],
+        },
+      }),
+    })
+    const app = await makeApp()
+    const res = await request(app)
+      .post('/api/assist/walkthrough')
+      .send({ ticket: TICKET })
+    expect(res.body.ticket_updates).toMatchObject({
+      definition_of_done: [
+        { item: 'Pull last year actuals', done: false },
+        { item: 'Sam approves the numbers', done: false },
+      ],
+      open_questions_to_add: ['Is the freeze date still in effect?'],
+      references_to_add: [
+        {
+          kind: 'link',
+          url_or_text: 'https://docs.example/q3',
+          label: 'Q3 doc',
+        },
+      ],
+    })
+  })
+
+  it('surfaces existing open_questions and references in the prompt to the model', async () => {
+    process.env.GEMINI_API_KEY = 'k'
+    generateContent.mockResolvedValueOnce({
+      text: JSON.stringify({ assistant_message: 'noted' }),
+    })
+    const app = await makeApp()
+    await request(app)
+      .post('/api/assist/walkthrough')
+      .send({
+        ticket: {
+          title: 'X',
+          definition_of_done: [{ item: 'ship it', done: true }],
+          open_questions: [
+            { question: 'who owns the ship date?', resolved: false, resolution: null },
+          ],
+          references: [
+            { kind: 'link', url_or_text: 'https://example.test/spec', label: 'spec' },
+          ],
+        },
+      })
+    const promptText = generateContent.mock.calls[0][0].contents as string
+    expect(promptText).toContain('Definition of done so far')
+    expect(promptText).toContain('[x] ship it')
+    expect(promptText).toContain('Open questions on this ticket')
+    expect(promptText).toContain('who owns the ship date?')
+    expect(promptText).toContain('References on this ticket')
+    expect(promptText).toContain('https://example.test/spec')
+  })
+
   it('next_steps phase: caps at 5', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({

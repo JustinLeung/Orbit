@@ -134,6 +134,8 @@ src/
                      #   through; conversation persists across sessions),
                      # TicketAssistView (compact summary in detail dialog
                      #   with "Continue" to reopen the chat),
+                     # TicketContextSections (DoD checklist, open questions,
+                     #   references — mounted in TicketDetailDialog),
                      # TicketCreateDialog (manual fallback),
                      # QuickAddInput, EditableField, form-helpers
     ui/              # shadcn/ui primitives (button, input, ...)
@@ -177,13 +179,15 @@ render.yaml          # Render Blueprint — Web Service config
 
 ## Data model summary
 
-Six tables, all scoped by `user_id` with RLS so the same schema works single- or multi-user:
+Eight tables, all scoped by `user_id` with RLS so the same schema works single- or multi-user:
 
-- `tickets` — the core entity
+- `tickets` — the core entity (`definition_of_done` jsonb checklist lives here)
 - `people` — anyone tied to a ticket
 - `ticket_participants` — many-to-many between tickets and people
 - `ticket_relations` — `relates_to` and `blocked_by` links between tickets
 - `ticket_events` — append-only history (status changes, notes, agent runs, …)
+- `ticket_open_questions` — explicit unresolved unknowns per ticket (resolvable, with optional resolution text)
+- `ticket_references` — typed pointers to source material (links, snippets, attachments, emails)
 - `agent_runs` — Assist-mode outputs awaiting your review
 
 Full schema: [`supabase/migrations/`](./supabase/migrations).
@@ -313,6 +317,10 @@ keeps using `npm run seed` with its own custom data.
 - [x] Status transitions (header dropdown + per-row quick action; emits
   `status_changed` events with `{from, to}` payload and auto-manages
   `closed_at`) — see ORB-8
+- [x] Structured context fields on every ticket — `definition_of_done`
+  jsonb checklist, plus first-class `ticket_open_questions` and
+  `ticket_references` tables. Surfaced inline in the detail dialog and
+  read/written by `/api/assist/walkthrough`. See ORB-21.
 - [ ] People CRUD + per-person ticket list
 - [ ] Assist mode on existing tickets → Gemini, writing into `agent_runs`
 - [ ] Review queue UI for agent output

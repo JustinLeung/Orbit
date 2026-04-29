@@ -115,6 +115,11 @@ const ticketSeed: Array<
     goal: 'Pick something thoughtful — Mom mentioned wanting a new herb planter.',
     urgency: 3,
     importance: 4,
+    definition_of_done: [
+      { item: 'Pick gift', done: false },
+      { item: 'Order in time for May 11', done: false },
+      { item: 'Write a card', done: false },
+    ],
   },
   {
     _key: 'inbox-thanksgiving',
@@ -206,6 +211,11 @@ const ticketSeed: Array<
     importance: 4,
     context:
       'Assist agent drafted a 5-day itinerary for the Oregon coast; awaiting review before booking.',
+    definition_of_done: [
+      { item: 'Lock dates', done: true },
+      { item: 'Book lodging', done: false },
+      { item: 'Send confirmation to family', done: false },
+    ],
   },
   {
     _key: 'stuck-garage',
@@ -282,6 +292,63 @@ const { error: participantsErr } = await supabase
     },
   ])
 if (participantsErr) throw participantsErr
+
+// Open questions + references ----------------------------------------
+
+const mothersDayId = ticketByTitle.get("Buy Mother's Day gift")!.id
+const tripId = ticketByTitle.get('Plan summer family trip')!.id
+const plumberId = ticketByTitle.get('Kitchen sink leak — plumber estimate')!.id
+
+const { error: openQuestionsErr } = await supabase
+  .from('ticket_open_questions')
+  .insert([
+    {
+      user_id: userId,
+      ticket_id: mothersDayId,
+      question: 'Does Mom prefer self-watering or terracotta?',
+    },
+    {
+      user_id: userId,
+      ticket_id: tripId,
+      question: 'Any allergies the cabin needs to accommodate?',
+    },
+    {
+      user_id: userId,
+      ticket_id: plumberId,
+      question: 'Is the leak under warranty from last year?',
+      resolved_at: new Date().toISOString(),
+      resolution: 'No — the original install is past its 12-month warranty.',
+    },
+  ])
+if (openQuestionsErr) throw openQuestionsErr
+
+const { error: referencesErr } = await supabase
+  .from('ticket_references')
+  .insert([
+    {
+      user_id: userId,
+      ticket_id: mothersDayId,
+      kind: 'link',
+      url_or_text: 'https://www.westelm.com/products/herb-planter',
+      label: 'West Elm herb planter',
+    },
+    {
+      user_id: userId,
+      ticket_id: tripId,
+      kind: 'snippet',
+      url_or_text:
+        'Cabin must sleep 6, dog-friendly, within 2 hrs of Portland.',
+      label: 'Constraints from family group chat',
+    },
+    {
+      user_id: userId,
+      ticket_id: tripId,
+      kind: 'email',
+      url_or_text: 'Itinerary draft from Assist (saved to Drafts)',
+      label: null,
+    },
+  ])
+if (referencesErr) throw referencesErr
 
 // History --------------------------------------------------------------
 

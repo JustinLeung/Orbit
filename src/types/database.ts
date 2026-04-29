@@ -155,6 +155,50 @@ export type Database = {
           },
         ]
       }
+      ticket_open_questions: {
+        Row: {
+          asked_at: string
+          created_at: string
+          id: string
+          question: string
+          resolution: string | null
+          resolved_at: string | null
+          ticket_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          asked_at?: string
+          created_at?: string
+          id?: string
+          question: string
+          resolution?: string | null
+          resolved_at?: string | null
+          ticket_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          asked_at?: string
+          created_at?: string
+          id?: string
+          question?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          ticket_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_open_questions_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ticket_participants: {
         Row: {
           created_at: string
@@ -184,6 +228,47 @@ export type Database = {
           },
           {
             foreignKeyName: "ticket_participants_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ticket_references: {
+        Row: {
+          created_at: string
+          id: string
+          kind: Database["public"]["Enums"]["ticket_reference_kind"]
+          label: string | null
+          ticket_id: string
+          updated_at: string
+          url_or_text: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["ticket_reference_kind"]
+          label?: string | null
+          ticket_id: string
+          updated_at?: string
+          url_or_text: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["ticket_reference_kind"]
+          label?: string | null
+          ticket_id?: string
+          updated_at?: string
+          url_or_text?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_references_ticket_id_fkey"
             columns: ["ticket_id"]
             isOneToOne: false
             referencedRelation: "tickets"
@@ -237,6 +322,7 @@ export type Database = {
           closed_at: string | null
           context: string | null
           created_at: string
+          definition_of_done: Json
           description: string | null
           energy_required: number | null
           goal: string | null
@@ -259,6 +345,7 @@ export type Database = {
           closed_at?: string | null
           context?: string | null
           created_at?: string
+          definition_of_done?: Json
           description?: string | null
           energy_required?: number | null
           goal?: string | null
@@ -281,6 +368,7 @@ export type Database = {
           closed_at?: string | null
           context?: string | null
           created_at?: string
+          definition_of_done?: Json
           description?: string | null
           energy_required?: number | null
           goal?: string | null
@@ -322,6 +410,12 @@ export type Database = {
         | "ticket_closed"
         | "ticket_dropped"
         | "field_updated"
+      ticket_reference_kind:
+        | "link"
+        | "snippet"
+        | "attachment"
+        | "email"
+        | "other"
       ticket_relation_type: "relates_to" | "blocked_by"
       ticket_status:
         | "inbox"
@@ -485,6 +579,13 @@ export const Constants = {
         "ticket_dropped",
         "field_updated",
       ],
+      ticket_reference_kind: [
+        "link",
+        "snippet",
+        "attachment",
+        "email",
+        "other",
+      ],
       ticket_relation_type: ["relates_to", "blocked_by"],
       ticket_status: [
         "inbox",
@@ -507,4 +608,3 @@ export const Constants = {
     },
   },
 } as const
-

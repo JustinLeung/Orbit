@@ -42,6 +42,9 @@ Cross-cutting:
     * next_action_at — ONLY if the user has explicitly stated a date or time (e.g. "the wedding is May 18", "Sam needs it by Friday"). Never guess. Output as ISO 8601 (with timezone if known, otherwise local-naive is fine, e.g. "2026-05-18T16:00").
     * type — only if the loop is clearly 'research', 'decision', 'follow_up', 'admin', or 'relationship' rather than the default 'task'
     * context — append-style: capture concrete details the user mentions that aren't a goal/description but matter (venue, dress code, address, links, key constraints). Preserve existing context when adding to it.
+    * definition_of_done — full-list replace. Concrete completion criteria as { item, done } pairs (e.g. {item: "countersigned PDF in Drive", done: false}). Best populated during shape phase when you articulate completion_criteria. If the user mentions something is already done, set done: true. Only output when you can write a meaningfully better list than what's currently there; otherwise omit. Preserve existing items the user has marked done.
+    * open_questions_to_add — APPEND-ONLY list of strings. Use this when you ask a clarifying question or surface an unknown the user can't immediately answer. Phrase as a question. Don't re-add questions already in the ticket's open_questions (they're shown to you).
+    * references_to_add — APPEND-ONLY list of typed pointers to source material the user mentions (URLs, document titles, email subjects, file names). Each entry is { kind, url_or_text, label?: string }. kind ∈ 'link' | 'snippet' | 'attachment' | 'email' | 'other'. Use 'link' for URLs the user pastes; 'snippet' for short text excerpts; 'email' for "the email from Sam"; 'attachment' for "the PDF"; 'other' otherwise. Don't re-add references already shown to you.
 - NEVER invent names, dates, or facts. Use the user's own words where possible.
 - Today's date is provided in the prompt for relative-date interpretation.`
 
@@ -156,11 +159,52 @@ const responseSchema = {
           ],
         },
         context: { type: Type.STRING, nullable: true },
+        definition_of_done: {
+          type: Type.ARRAY,
+          nullable: true,
+          description:
+            'Full replace. Concrete completion criteria; preserve user-marked done items.',
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              item: { type: Type.STRING },
+              done: { type: Type.BOOLEAN },
+            },
+            required: ['item', 'done'],
+          },
+        },
+        open_questions_to_add: {
+          type: Type.ARRAY,
+          nullable: true,
+          description:
+            'Append-only. Phrased as questions. Skip duplicates of existing open_questions.',
+          items: { type: Type.STRING },
+        },
+        references_to_add: {
+          type: Type.ARRAY,
+          nullable: true,
+          description:
+            'Append-only. Typed pointers to source material the user mentioned.',
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              kind: {
+                type: Type.STRING,
+                enum: ['link', 'snippet', 'attachment', 'email', 'other'],
+              },
+              url_or_text: { type: Type.STRING },
+              label: { type: Type.STRING, nullable: true },
+            },
+            required: ['kind', 'url_or_text'],
+          },
+        },
       },
     },
   },
   required: ['assistant_message'],
 }
+
+type ReferenceKind = 'link' | 'snippet' | 'attachment' | 'email' | 'other'
 
 type TicketUpdates = {
   goal?: string | null
@@ -177,6 +221,13 @@ type TicketUpdates = {
     | 'relationship'
     | null
   context?: string | null
+  definition_of_done?: Array<{ item: string; done: boolean }> | null
+  open_questions_to_add?: string[] | null
+  references_to_add?: Array<{
+    kind: ReferenceKind
+    url_or_text: string
+    label?: string | null
+  }> | null
 }
 
 type ModelResponse = {
@@ -231,6 +282,72 @@ function sanitizeTicketUpdates(
       any = true
     }
   }
+  if (Array.isArray(raw.definition_of_done)) {
+    const dod: Array<{ item: string; done: boolean }> = []
+    for (const entry of raw.definition_of_done) {
+      if (
+        entry &&
+        typeof entry === 'object' &&
+        typeof entry.item === 'string' &&
+        entry.item.trim() !== ''
+      ) {
+        dod.push({
+          item: entry.item.trim(),
+          done: entry.done === true,
+        })
+      }
+    }
+    if (dod.length > 0) {
+      out.definition_of_done = dod
+      any = true
+    }
+  }
+  if (Array.isArray(raw.open_questions_to_add)) {
+    const qs: string[] = []
+    for (const q of raw.open_questions_to_add) {
+      if (typeof q === 'string' && q.trim() !== '') qs.push(q.trim())
+    }
+    if (qs.length > 0) {
+      out.open_questions_to_add = qs
+      any = true
+    }
+  }
+  if (Array.isArray(raw.references_to_add)) {
+    const refs: Array<{
+      kind: ReferenceKind
+      url_or_text: string
+      label?: string | null
+    }> = []
+    const kinds: ReferenceKind[] = [
+      'link',
+      'snippet',
+      'attachment',
+      'email',
+      'other',
+    ]
+    for (const r of raw.references_to_add) {
+      if (
+        r &&
+        typeof r === 'object' &&
+        typeof r.url_or_text === 'string' &&
+        r.url_or_text.trim() !== '' &&
+        kinds.includes(r.kind as ReferenceKind)
+      ) {
+        refs.push({
+          kind: r.kind as ReferenceKind,
+          url_or_text: r.url_or_text.trim(),
+          label:
+            typeof r.label === 'string' && r.label.trim() !== ''
+              ? r.label.trim()
+              : null,
+        })
+      }
+    }
+    if (refs.length > 0) {
+      out.references_to_add = refs
+      any = true
+    }
+  }
   return any ? out : null
 }
 
@@ -272,6 +389,26 @@ function buildPrompt(
   for (const [k, v] of fields) {
     if (v === null || v === undefined || v === '') continue
     lines.push(`- ${k}: ${String(v)}`)
+  }
+  if (ticket.definition_of_done && ticket.definition_of_done.length > 0) {
+    lines.push('', 'Definition of done so far:')
+    for (const it of ticket.definition_of_done) {
+      lines.push(`- [${it.done ? 'x' : ' '}] ${it.item}`)
+    }
+  }
+  if (ticket.open_questions && ticket.open_questions.length > 0) {
+    lines.push('', 'Open questions on this ticket (do not re-add):')
+    for (const q of ticket.open_questions) {
+      lines.push(
+        `- ${q.resolved ? '[resolved] ' : ''}${q.question}${q.resolution ? ` → ${q.resolution}` : ''}`,
+      )
+    }
+  }
+  if (ticket.references && ticket.references.length > 0) {
+    lines.push('', 'References on this ticket (do not re-add):')
+    for (const r of ticket.references) {
+      lines.push(`- (${r.kind}) ${r.label ? `${r.label}: ` : ''}${r.url_or_text}`)
+    }
   }
   if (state.shape) {
     lines.push('', 'Current shape:', JSON.stringify(state.shape, null, 2))

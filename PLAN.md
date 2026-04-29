@@ -61,6 +61,12 @@ Fields:
 - `importance`
 - `energy_required`
 - `context`
+- `definition_of_done` (jsonb `[{item, done}]` checklist — distinct from
+  `goal`; tells humans + AI when to stop)
+- `open_questions` (via `ticket_open_questions` child table — explicit
+  unresolved unknowns, each with optional resolution text)
+- `references` (via `ticket_references` child table — typed pointers to
+  source material: link / snippet / attachment / email / other)
 - `agent_mode`
 - `agent_status`
 - `created_at`
@@ -131,6 +137,39 @@ Event types:
 - `participant_added`
 - `ticket_closed`
 - `ticket_dropped`
+
+### TicketOpenQuestion
+
+Per-ticket child rows for unresolved unknowns. Resolved entries become a
+local decisions log via `resolution`.
+
+Fields:
+
+- `id`
+- `ticket_id`
+- `user_id`
+- `question`
+- `asked_at`
+- `resolved_at`
+- `resolution`
+- `created_at`
+- `updated_at`
+
+### TicketReference
+
+Per-ticket child rows for source material the user (or Assist) wants to
+keep pinned alongside the ticket.
+
+Fields:
+
+- `id`
+- `ticket_id`
+- `user_id`
+- `kind` (enum: `link` | `snippet` | `attachment` | `email` | `other`)
+- `url_or_text`
+- `label`
+- `created_at`
+- `updated_at`
 
 ### AgentRun
 
@@ -205,6 +244,7 @@ For MVP: `none`, `assist`.
 ### Assist Mode Can
 
 - walk the user through a phased assist flow on every ticket — Shape (the whole arc), Position (where you are, what's blocked), Next steps (concrete actions). Conversation and state persist in `agent_runs` so the user can leave at any time and resume. Shipped — `/api/assist/walkthrough`. Follow-up: move the persisted state to a dedicated `tickets.assist_state` JSONB column instead of the latest `agent_runs` row.
+- capture structured context the user mentions — write a `definition_of_done` checklist, append unresolved questions to `ticket_open_questions`, and pin source material to `ticket_references` (link / snippet / attachment / email).
 - summarize ticket
 - suggest next action
 - draft follow-up message
