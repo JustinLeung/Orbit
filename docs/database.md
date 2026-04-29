@@ -49,6 +49,7 @@ Migrations are timestamped; each adds a focused chunk:
 | `20260428232204_add_field_updated_event.sql` | Adds `field_updated` to `ticket_event_type` so generic field edits get audited. |
 | `20260429064856_add_ticket_context_fields.sql` | Adds `tickets.definition_of_done` (jsonb), `ticket_open_questions`, `ticket_references`. |
 | `20260429070500_update_onboarding_with_context.sql` | Re-creates the onboarding seed so it demonstrates the new context fields. |
+| `20260429094307_add_ticket_short_id.sql` | Adds `tickets.short_id` (per-user sequential integer) + a `BEFORE INSERT` trigger that allocates the next number per `user_id`. Backfills existing rows by `created_at`. Surfaced in the UI as `#N`. |
 
 Always create a new migration file rather than editing an old one once it's merged — `supabase db reset` runs them in order, and editing a deployed migration breaks any environment that's already past it.
 

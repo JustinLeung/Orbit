@@ -200,7 +200,7 @@ render.yaml          # Render Blueprint — Web Service config
 
 Eight tables, all scoped by `user_id` with RLS so the same schema works single- or multi-user:
 
-- `tickets` — the core entity (`definition_of_done` jsonb checklist lives here)
+- `tickets` — the core entity (`definition_of_done` jsonb checklist lives here; `short_id` is a per-user sequential integer surfaced in the UI as `#N`)
 - `people` — anyone tied to a ticket
 - `ticket_participants` — many-to-many between tickets and people
 - `ticket_relations` — `relates_to` and `blocked_by` links between tickets
