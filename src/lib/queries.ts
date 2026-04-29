@@ -424,10 +424,22 @@ export type FieldChange = {
   new: FieldChangeValue
 }
 
+const TERMINAL_STATUSES: ReadonlyArray<TicketStatus> = ['closed', 'dropped']
+
+function isTerminal(status: TicketStatus): boolean {
+  return TERMINAL_STATUSES.includes(status)
+}
+
 // updateTicket persists `patch` and writes one ticket_events row per
 // changed field. Caller passes `changedFields` (it knows the prior values).
 // Same non-transactional convention as createTicket — event insert failures
 // are logged but don't fail the update.
+//
+// Status transitions are special-cased:
+//   - moving into closed/dropped sets closed_at = now() (if not already set)
+//   - moving out of closed/dropped clears closed_at
+//   - the change is logged as `status_changed` with {from, to} payload
+//     instead of the generic `field_updated`.
 export async function updateTicket(
   id: string,
   patch: TicketUpdate,
@@ -438,9 +450,21 @@ export async function updateTicket(
   const userId = auth.user?.id
   if (!userId) throw new Error('Not signed in')
 
+  const effectivePatch: TicketUpdate = { ...patch }
+  if (patch.status !== undefined) {
+    const next = patch.status as TicketStatus
+    if (isTerminal(next)) {
+      if (effectivePatch.closed_at === undefined) {
+        effectivePatch.closed_at = new Date().toISOString()
+      }
+    } else {
+      effectivePatch.closed_at = null
+    }
+  }
+
   const { data: ticket, error } = await supabase
     .from('tickets')
-    .update(patch)
+    .update(effectivePatch)
     .eq('id', id)
     .select()
     .single()
@@ -448,12 +472,23 @@ export async function updateTicket(
 
   const changes = options?.changedFields ?? []
   if (changes.length > 0) {
-    const events: TicketEventInsert[] = changes.map((c) => ({
-      user_id: userId,
-      ticket_id: ticket.id,
-      event_type: c.field === 'next_action' ? 'next_action_updated' : 'field_updated',
-      payload: { field: c.field, old: c.old, new: c.new },
-    }))
+    const events: TicketEventInsert[] = changes.map((c) => {
+      if (c.field === 'status') {
+        return {
+          user_id: userId,
+          ticket_id: ticket.id,
+          event_type: 'status_changed',
+          payload: { from: c.old, to: c.new },
+        }
+      }
+      return {
+        user_id: userId,
+        ticket_id: ticket.id,
+        event_type:
+          c.field === 'next_action' ? 'next_action_updated' : 'field_updated',
+        payload: { field: c.field, old: c.old, new: c.new },
+      }
+    })
     const { error: eventErr } = await supabase
       .from('ticket_events')
       .insert(events)

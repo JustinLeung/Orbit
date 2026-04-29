@@ -10,6 +10,7 @@ import {
   AGENT_MODE_OPTIONS,
   ScaleSelect,
   Select,
+  STATUS_OPTIONS,
   Textarea,
 } from '@/components/tickets/form-helpers'
 import type {
@@ -28,16 +29,6 @@ const TYPE_LABEL: Record<TicketType, string> = {
   follow_up: 'Follow-up',
   admin: 'Admin',
   relationship: 'Relationship',
-}
-
-const STATUS_LABEL: Record<TicketStatus, string> = {
-  inbox: 'Inbox',
-  active: 'Active',
-  waiting: 'Waiting',
-  follow_up: 'Follow-up',
-  review: 'Review',
-  closed: 'Closed',
-  dropped: 'Dropped',
 }
 
 const AGENT_MODE_LABEL: Record<AgentMode, string> = {
@@ -156,9 +147,24 @@ export function TicketDetailDialog({
                     <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                       {TYPE_LABEL[editing.type]}
                     </span>
-                    <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {STATUS_LABEL[editing.status]}
-                    </span>
+                    <select
+                      aria-label="Status"
+                      value={editing.status}
+                      onChange={(e) => {
+                        const next = e.target.value as TicketStatus
+                        if (next === editing.status) return
+                        void saveField('status', next, { status: next }).catch(
+                          (err) => console.error('status update failed', err),
+                        )
+                      }}
+                      className="h-[22px] rounded border bg-muted px-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <Dialog.Close

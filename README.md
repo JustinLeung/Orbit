@@ -308,7 +308,9 @@ keeps using `npm run seed` with its own custom data.
   the dialog at any time and pick up where you left off from the ticket
   detail's Assist panel. Manual ticket form stays available as a fallback.
 - [ ] Ticket detail view with history (`ticket_events` rendered in the dialog)
-- [ ] Status transitions + computed views (Now, Waiting, Stuck)
+- [x] Status transitions (header dropdown + per-row quick action; emits
+  `status_changed` events with `{from, to}` payload and auto-manages
+  `closed_at`) — see ORB-8
 - [ ] People CRUD + per-person ticket list
 - [ ] Assist mode on existing tickets → Gemini, writing into `agent_runs`
 - [ ] Review queue UI for agent output
