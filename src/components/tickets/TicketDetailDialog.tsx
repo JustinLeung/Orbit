@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { updateTicket, type FieldChangeValue } from '@/lib/queries'
 import { EditableField } from '@/components/tickets/EditableField'
 import { TicketAssistView } from '@/components/tickets/TicketAssistView'
+import { TicketContextSections } from '@/components/tickets/TicketContextSections'
 import {
   AGENT_MODE_OPTIONS,
   ScaleSelect,
@@ -238,6 +239,15 @@ export function TicketDetailDialog({
                       placeholder="Why does this matter?"
                     />
                   )}
+                />
+
+                <TicketContextSections
+                  ticket={editing}
+                  onTicketChange={(next) =>
+                    setEditing((cur) =>
+                      cur && cur.id === next.id ? next : cur,
+                    )
+                  }
                 />
 
                 <EditableField<string | null>

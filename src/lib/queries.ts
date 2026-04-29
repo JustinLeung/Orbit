@@ -2,13 +2,20 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type {
   AgentRun,
+  DefinitionOfDoneItem,
   Person,
   Ticket,
   TicketEventInsert,
   TicketInsert,
+  TicketOpenQuestion,
+  TicketReference,
+  TicketReferenceInsert,
+  TicketReferenceKind,
+  TicketReferenceUpdate,
   TicketStatus,
   TicketUpdate,
 } from '@/types/orbit'
+import type { Json } from '@/types/database'
 import type { AssistState } from '@/lib/assistTypes'
 
 type State<T> = {
@@ -197,7 +204,24 @@ function notifyAssistChanged() {
   window.dispatchEvent(new CustomEvent(ASSIST_CHANGED_EVENT))
 }
 
-function ticketSnapshot(ticket: Ticket) {
+async function ticketSnapshot(ticket: Ticket) {
+  // Fetch the latest open questions + references so Assist sees them. The
+  // 20-row caps are defensive against runaway lists; assist will mostly see
+  // < 5 of each in practice.
+  const [{ data: oqRows }, { data: refRows }] = await Promise.all([
+    supabase
+      .from('ticket_open_questions')
+      .select('question, resolved_at, resolution')
+      .eq('ticket_id', ticket.id)
+      .order('asked_at', { ascending: true })
+      .limit(20),
+    supabase
+      .from('ticket_references')
+      .select('kind, url_or_text, label')
+      .eq('ticket_id', ticket.id)
+      .order('created_at', { ascending: true })
+      .limit(20),
+  ])
   return {
     title: ticket.title,
     description: ticket.description,
@@ -210,6 +234,13 @@ function ticketSnapshot(ticket: Ticket) {
     importance: ticket.importance,
     energy_required: ticket.energy_required,
     context: ticket.context,
+    definition_of_done: (ticket.definition_of_done as DefinitionOfDoneItem[]) ?? [],
+    open_questions: (oqRows ?? []).map((r) => ({
+      question: r.question,
+      resolved: r.resolved_at !== null,
+      resolution: r.resolution,
+    })),
+    references: refRows ?? [],
   }
 }
 
@@ -274,6 +305,15 @@ type TicketUpdatesPatch = {
   next_action_at?: string | null
   type?: Ticket['type'] | null
   context?: string | null
+  definition_of_done?: DefinitionOfDoneItem[] | null
+  // Append-only on purpose: the model doesn't see row IDs, so a full-list
+  // replace would clobber user-resolved questions and de-duped references.
+  open_questions_to_add?: string[] | null
+  references_to_add?: Array<{
+    kind: TicketReferenceKind
+    url_or_text: string
+    label?: string | null
+  }> | null
 }
 
 // Calls /api/assist/walkthrough, persists the new state as a fresh agent_run,
@@ -298,7 +338,7 @@ export async function runAssistTurn(args: {
   const userId = sessionData.session?.user.id
   if (!accessToken || !userId) throw new Error('Not signed in')
 
-  const snapshot = ticketSnapshot(args.ticket)
+  const snapshot = await ticketSnapshot(args.ticket)
   const res = await fetch('/api/assist/walkthrough', {
     method: 'POST',
     headers: {
@@ -326,7 +366,7 @@ export async function runAssistTurn(args: {
   if (proposed) {
     const patch: TicketUpdate = {}
     const changes: FieldChange[] = []
-    const fields: Array<keyof TicketUpdatesPatch> = [
+    const scalarFields: Array<keyof TicketUpdatesPatch> = [
       'goal',
       'description',
       'next_action',
@@ -334,7 +374,7 @@ export async function runAssistTurn(args: {
       'type',
       'context',
     ]
-    for (const f of fields) {
+    for (const f of scalarFields) {
       const v = proposed[f]
       if (v === undefined || v === null) continue
       const current = ticket[f as keyof Ticket] as FieldChangeValue
@@ -343,12 +383,87 @@ export async function runAssistTurn(args: {
       ;(patch as any)[f] = v
       changes.push({ field: f, old: current ?? null, new: v as FieldChangeValue })
     }
+    // definition_of_done is a full-list replace; equality is by JSON
+    // stringify (reference equality is meaningless across re-fetches).
+    if (proposed.definition_of_done) {
+      const nextDod = proposed.definition_of_done
+      const currentDod =
+        (ticket.definition_of_done as DefinitionOfDoneItem[] | null) ?? []
+      if (JSON.stringify(currentDod) !== JSON.stringify(nextDod)) {
+        patch.definition_of_done = nextDod as unknown as Json
+        changes.push({
+          field: 'definition_of_done',
+          old: currentDod as unknown as Json,
+          new: nextDod as unknown as Json,
+        })
+      }
+    }
+    let ticketUpdateOk = true
     if (changes.length > 0) {
       try {
         ticket = await updateTicket(ticket.id, patch, { changedFields: changes })
         for (const c of changes) applied.push({ field: c.field, new: c.new })
       } catch (err) {
+        ticketUpdateOk = false
         console.error('walkthrough ticket_updates apply failed', err)
+      }
+    }
+
+    // Append-only child rows. Skip if the parent ticket update just failed —
+    // appending questions/refs and reporting them as "applied" while the
+    // scalar/DoD patch silently failed would lie to the user. Dedupe against
+    // the snapshot we already fetched: the model has been told the existing
+    // list but it still sometimes echoes items back. URL paths are
+    // case-sensitive so we only normalize whitespace, not case.
+    if (ticketUpdateOk) {
+      const existingQuestions = new Set(
+        snapshot.open_questions
+          .filter((q) => !q.resolved)
+          .map((q) => q.question.trim().toLowerCase()),
+      )
+      let addedQuestions = 0
+      for (const q of proposed.open_questions_to_add ?? []) {
+        const text = q?.trim()
+        if (!text) continue
+        const key = text.toLowerCase()
+        if (existingQuestions.has(key)) continue
+        existingQuestions.add(key)
+        try {
+          await addOpenQuestion(ticket.id, text)
+          addedQuestions += 1
+        } catch (err) {
+          console.error('open_question add failed', err)
+        }
+      }
+      if (addedQuestions > 0) {
+        applied.push({ field: 'open_questions', new: `added ${addedQuestions}` })
+      }
+
+      const existingRefs = new Set(
+        snapshot.references.map(
+          (r) => `${r.kind}::${(r.url_or_text ?? '').trim()}`,
+        ),
+      )
+      let addedRefs = 0
+      for (const r of proposed.references_to_add ?? []) {
+        const url = r?.url_or_text?.trim()
+        if (!url) continue
+        const key = `${r.kind}::${url}`
+        if (existingRefs.has(key)) continue
+        existingRefs.add(key)
+        try {
+          await addReference(ticket.id, {
+            kind: r.kind,
+            url_or_text: url,
+            label: r.label ?? null,
+          })
+          addedRefs += 1
+        } catch (err) {
+          console.error('reference add failed', err)
+        }
+      }
+      if (addedRefs > 0) {
+        applied.push({ field: 'references', new: `added ${addedRefs}` })
       }
     }
   }
@@ -404,7 +519,7 @@ export async function persistAssistState(
   const { error: runErr } = await supabase.from('agent_runs').insert({
     user_id: userId,
     ticket_id: ticket.id,
-    input_context: { snapshot: ticketSnapshot(ticket), reason },
+    input_context: { snapshot: await ticketSnapshot(ticket), reason },
     output: JSON.stringify(state),
     needs_feedback: false,
   })
@@ -421,7 +536,11 @@ export async function persistAssistState(
   notifyAssistChanged()
 }
 
-export type FieldChangeValue = string | number | null
+// FieldChangeValue covers the audit payload shape: scalar fields (most of
+// the ticket) are stringy/numeric, but jsonb fields like definition_of_done
+// flow through as JSON arrays/objects. The event payload column is jsonb so
+// any Json shape is fine.
+export type FieldChangeValue = Json
 export type FieldChange = {
   field: string
   old: FieldChangeValue
@@ -503,4 +622,199 @@ export async function updateTicket(
 
   notifyTicketsChanged()
   return ticket
+}
+
+// ── ticket_open_questions ────────────────────────────────────────────────
+
+const OPEN_QUESTIONS_CHANGED_EVENT = 'orbit:open-questions-changed'
+function notifyOpenQuestionsChanged() {
+  window.dispatchEvent(new CustomEvent(OPEN_QUESTIONS_CHANGED_EVENT))
+}
+
+export function useTicketOpenQuestions(ticketId: string | null) {
+  const [data, setData] = useState<TicketOpenQuestion[]>([])
+  const [loading, setLoading] = useState(false)
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => {
+    if (!ticketId) {
+      setData([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    supabase
+      .from('ticket_open_questions')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('asked_at', { ascending: true })
+      .then(({ data: rows, error }) => {
+        if (cancelled) return
+        if (error) console.error('useTicketOpenQuestions', error)
+        setData(rows ?? [])
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ticketId, version])
+
+  useEffect(() => {
+    function refresh() {
+      setVersion((v) => v + 1)
+    }
+    window.addEventListener(OPEN_QUESTIONS_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(OPEN_QUESTIONS_CHANGED_EVENT, refresh)
+  }, [])
+
+  return { data, loading }
+}
+
+export async function addOpenQuestion(
+  ticketId: string,
+  question: string,
+): Promise<TicketOpenQuestion> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { data, error } = await supabase
+    .from('ticket_open_questions')
+    .insert({ user_id: userId, ticket_id: ticketId, question })
+    .select()
+    .single()
+  if (error) throw error
+  notifyOpenQuestionsChanged()
+  return data
+}
+
+export async function resolveOpenQuestion(
+  id: string,
+  resolution: string | null,
+): Promise<TicketOpenQuestion> {
+  const { data, error } = await supabase
+    .from('ticket_open_questions')
+    .update({
+      resolved_at: new Date().toISOString(),
+      resolution: resolution && resolution.trim() ? resolution.trim() : null,
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  notifyOpenQuestionsChanged()
+  return data
+}
+
+export async function reopenOpenQuestion(
+  id: string,
+): Promise<TicketOpenQuestion> {
+  const { data, error } = await supabase
+    .from('ticket_open_questions')
+    .update({ resolved_at: null, resolution: null })
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  notifyOpenQuestionsChanged()
+  return data
+}
+
+export async function deleteOpenQuestion(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('ticket_open_questions')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+  notifyOpenQuestionsChanged()
+}
+
+// ── ticket_references ────────────────────────────────────────────────────
+
+const REFERENCES_CHANGED_EVENT = 'orbit:references-changed'
+function notifyReferencesChanged() {
+  window.dispatchEvent(new CustomEvent(REFERENCES_CHANGED_EVENT))
+}
+
+export function useTicketReferences(ticketId: string | null) {
+  const [data, setData] = useState<TicketReference[]>([])
+  const [loading, setLoading] = useState(false)
+  const [version, setVersion] = useState(0)
+
+  useEffect(() => {
+    if (!ticketId) {
+      setData([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    supabase
+      .from('ticket_references')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+      .then(({ data: rows, error }) => {
+        if (cancelled) return
+        if (error) console.error('useTicketReferences', error)
+        setData(rows ?? [])
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ticketId, version])
+
+  useEffect(() => {
+    function refresh() {
+      setVersion((v) => v + 1)
+    }
+    window.addEventListener(REFERENCES_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(REFERENCES_CHANGED_EVENT, refresh)
+  }, [])
+
+  return { data, loading }
+}
+
+export async function addReference(
+  ticketId: string,
+  input: Omit<TicketReferenceInsert, 'user_id' | 'ticket_id'>,
+): Promise<TicketReference> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { data, error } = await supabase
+    .from('ticket_references')
+    .insert({ ...input, user_id: userId, ticket_id: ticketId })
+    .select()
+    .single()
+  if (error) throw error
+  notifyReferencesChanged()
+  return data
+}
+
+export async function updateReference(
+  id: string,
+  patch: TicketReferenceUpdate,
+): Promise<TicketReference> {
+  const { data, error } = await supabase
+    .from('ticket_references')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  notifyReferencesChanged()
+  return data
+}
+
+export async function deleteReference(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('ticket_references')
+    .delete()
+    .eq('id', id)
+  if (error) throw error
+  notifyReferencesChanged()
 }

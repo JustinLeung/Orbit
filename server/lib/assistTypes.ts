@@ -65,6 +65,13 @@ export type AssistState = {
   messages: AssistMessage[]
 }
 
+export type TicketReferenceKind =
+  | 'link'
+  | 'snippet'
+  | 'attachment'
+  | 'email'
+  | 'other'
+
 export type TicketSnapshot = {
   title: string
   description?: string | null
@@ -77,4 +84,15 @@ export type TicketSnapshot = {
   importance?: number | null
   energy_required?: number | null
   context?: string | null
+  definition_of_done?: Array<{ item: string; done: boolean }> | null
+  open_questions?: Array<{
+    question: string
+    resolved: boolean
+    resolution: string | null
+  }> | null
+  references?: Array<{
+    kind: TicketReferenceKind
+    url_or_text: string
+    label: string | null
+  }> | null
 }
