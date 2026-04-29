@@ -18,7 +18,7 @@ Tagline: Keep every open loop in motion.
 - Node + Express server (serves the Vite build and `/api/*` routes)
 - Supabase (local CLI for dev, hosted later) — ports remapped to 544xx (see supabase/config.toml)
 - Auth: Email OTP (6-digit code, via Supabase Auth)
-- AI: Gemini (Assist mode only for MVP, called from the Express server — `/api/assist/clarify` for ticket capture)
+- AI: Gemini (Assist mode only for MVP, called from the Express server — `/api/assist/walkthrough` powers the phased capture+assist flow: Shape → Position → Next steps)
 - Email: Resend, called from the Express server (`/api/send-email`)
 - Hosting: Render (Web Service, Node runtime)
 
@@ -204,7 +204,7 @@ For MVP: `none`, `assist`.
 
 ### Assist Mode Can
 
-- ask clarifying questions during ticket capture and draft the resulting ticket (shipped — `/api/assist/clarify`)
+- walk the user through a phased assist flow on every ticket — Shape (the whole arc), Position (where you are, what's blocked), Next steps (concrete actions). Conversation and state persist in `agent_runs` so the user can leave at any time and resume. Shipped — `/api/assist/walkthrough`. Follow-up: move the persisted state to a dedicated `tickets.assist_state` JSONB column instead of the latest `agent_runs` row.
 - summarize ticket
 - suggest next action
 - draft follow-up message
