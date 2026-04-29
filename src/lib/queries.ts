@@ -384,6 +384,39 @@ export async function runAssistTurn(args: {
   }
 }
 
+// Persists an assist state without going through the model — used when the
+// user makes a direct UI gesture (e.g. "I'm here" on a shape phase) that
+// deterministically updates state. Writes an agent_run row + ticket_event.
+export async function persistAssistState(
+  ticket: Ticket,
+  state: AssistState,
+  reason: string,
+): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { error: runErr } = await supabase.from('agent_runs').insert({
+    user_id: userId,
+    ticket_id: ticket.id,
+    input_context: { snapshot: ticketSnapshot(ticket), reason },
+    output: JSON.stringify(state),
+    needs_feedback: false,
+  })
+  if (runErr) console.error('agent_runs insert (local) failed', runErr)
+
+  const { error: evtErr } = await supabase.from('ticket_events').insert({
+    user_id: userId,
+    ticket_id: ticket.id,
+    event_type: 'agent_ran',
+    payload: { agent: 'walkthrough', phase: state.phase, source: reason },
+  })
+  if (evtErr) console.error('agent_ran event insert failed', evtErr)
+
+  notifyAssistChanged()
+}
+
 export type FieldChangeValue = string | number | null
 export type FieldChange = {
   field: string
