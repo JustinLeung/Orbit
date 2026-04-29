@@ -292,15 +292,19 @@ export async function runAssistTurn(args: {
   ticket: Ticket
   applied_updates: Array<{ field: string; new: FieldChangeValue }>
 }> {
-  const { data: auth, error: authErr } = await supabase.auth.getUser()
-  if (authErr) throw authErr
-  const userId = auth.user?.id
-  if (!userId) throw new Error('Not signed in')
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+  if (sessionErr) throw sessionErr
+  const accessToken = sessionData.session?.access_token
+  const userId = sessionData.session?.user.id
+  if (!accessToken || !userId) throw new Error('Not signed in')
 
   const snapshot = ticketSnapshot(args.ticket)
   const res = await fetch('/api/assist/walkthrough', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${accessToken}`,
+    },
     body: JSON.stringify({
       ticket: snapshot,
       state: args.state,
