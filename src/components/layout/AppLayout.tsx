@@ -11,8 +11,9 @@ import {
   Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useAuth } from '@/lib/auth'
-import { CreateTicketProvider, useCreateTicket } from '@/lib/createTicket'
+import { useAuth } from '@/lib/useAuth'
+import { CreateTicketProvider } from '@/lib/createTicket'
+import { useCreateTicket } from '@/lib/useCreateTicket'
 import { cn } from '@/lib/utils'
 
 const navItems = [

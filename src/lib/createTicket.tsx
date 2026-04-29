@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -12,15 +10,8 @@ import {
   type TicketCreatePrefill,
 } from '@/components/tickets/TicketCreateDialog'
 import { TicketCreateChat } from '@/components/tickets/TicketCreateChat'
+import { CreateTicketContext } from '@/lib/useCreateTicket'
 import type { TicketStatus } from '@/types/orbit'
-
-type CreateTicketContextValue = {
-  openCreate: (defaultStatus?: TicketStatus) => void
-}
-
-const CreateTicketContext = createContext<CreateTicketContextValue | undefined>(
-  undefined,
-)
 
 type Mode = 'closed' | 'chat' | 'manual'
 
@@ -94,11 +85,4 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
       />
     </CreateTicketContext.Provider>
   )
-}
-
-export function useCreateTicket() {
-  const ctx = useContext(CreateTicketContext)
-  if (!ctx)
-    throw new Error('useCreateTicket must be used within CreateTicketProvider')
-  return ctx
 }

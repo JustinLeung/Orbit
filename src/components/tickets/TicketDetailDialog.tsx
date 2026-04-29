@@ -7,13 +7,11 @@ import { updateTicket, type FieldChangeValue } from '@/lib/queries'
 import { EditableField } from '@/components/tickets/EditableField'
 import { TicketAssistView } from '@/components/tickets/TicketAssistView'
 import { TicketContextSections } from '@/components/tickets/TicketContextSections'
+import { ScaleSelect, Select, Textarea } from '@/components/tickets/form-helpers'
 import {
   AGENT_MODE_OPTIONS,
-  ScaleSelect,
-  Select,
   STATUS_OPTIONS,
-  Textarea,
-} from '@/components/tickets/form-helpers'
+} from '@/components/tickets/form-constants'
 import type {
   AgentMode,
   Ticket,

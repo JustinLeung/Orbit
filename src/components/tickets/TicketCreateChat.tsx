@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dialog } from 'radix-ui'
 import { Loader2, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -29,19 +29,48 @@ export function TicketCreateChat({
   onSwitchToManual: (prefill?: { title?: string }) => void
   defaultStatus?: TicketStatus
 }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+        <Dialog.Content
+          className={cn(
+            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(820px,90vh)] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+            'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
+          )}
+          aria-describedby={undefined}
+        >
+          {/* Capture flow lives inside Dialog.Content so Radix's unmount on
+              close gives us a fresh state slate every time the dialog opens. */}
+          <CaptureFlow
+            onClose={() => onOpenChange(false)}
+            onCreated={onCreated}
+            onSwitchToManual={onSwitchToManual}
+            defaultStatus={defaultStatus}
+          />
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+function CaptureFlow({
+  onClose,
+  onCreated,
+  onSwitchToManual,
+  defaultStatus,
+}: {
+  onClose: () => void
+  onCreated?: (ticket: Ticket) => void
+  onSwitchToManual: (prefill?: { title?: string }) => void
+  defaultStatus?: TicketStatus
+}) {
   const [initial, setInitial] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [ticket, setTicket] = useState<Ticket | null>(null)
-
-  useEffect(() => {
-    if (open) {
-      setInitial('')
-      setCreating(false)
-      setCreateError(null)
-      setTicket(null)
-    }
-  }, [open])
 
   async function startCapture() {
     const trimmed = initial.trim()
@@ -68,63 +97,47 @@ export function TicketCreateChat({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
-        <Dialog.Content
-          className={cn(
-            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(820px,90vh)] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
-            'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
-          )}
-          aria-describedby={undefined}
-        >
-          <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-              <Dialog.Title className="text-base font-semibold leading-snug">
-                {ticket ? ticket.title : 'New ticket'}
-              </Dialog.Title>
-            </div>
-            <div className="flex items-center gap-1">
-              {!ticket ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={switchToManual}
-                >
-                  Fill in manually
-                </Button>
-              ) : null}
-              <Dialog.Close
-                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </Dialog.Close>
-            </div>
-          </div>
+    <>
+      <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+          <Dialog.Title className="text-base font-semibold leading-snug">
+            {ticket ? ticket.title : 'New ticket'}
+          </Dialog.Title>
+        </div>
+        <div className="flex items-center gap-1">
+          {!ticket ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={switchToManual}
+            >
+              Fill in manually
+            </Button>
+          ) : null}
+          <Dialog.Close
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </Dialog.Close>
+        </div>
+      </div>
 
-          {ticket ? (
-            <TicketAssistChat
-              ticket={ticket}
-              onClose={() => onOpenChange(false)}
-            />
-          ) : (
-            <InitialInput
-              value={initial}
-              onChange={setInitial}
-              creating={creating}
-              error={createError}
-              onSubmit={startCapture}
-              onSwitchToManual={switchToManual}
-            />
-          )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {ticket ? (
+        <TicketAssistChat ticket={ticket} onClose={onClose} />
+      ) : (
+        <InitialInput
+          value={initial}
+          onChange={setInitial}
+          creating={creating}
+          error={createError}
+          onSubmit={startCapture}
+          onSwitchToManual={switchToManual}
+        />
+      )}
+    </>
   )
 }
 

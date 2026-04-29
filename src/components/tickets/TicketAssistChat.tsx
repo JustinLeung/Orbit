@@ -49,28 +49,27 @@ export function TicketAssistChat({
   const { data: persisted, loading: loadingState } = useLatestAssistState(
     ticket.id,
   )
-  const [state, setState] = useState<AssistState | null>(null)
+  const [override, setOverride] = useState<AssistState | null>(null)
+  const state = override ?? persisted ?? null
   const [readyToAdvance, setReadyToAdvance] = useState(false)
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [bootstrapped, setBootstrapped] = useState(false)
+  const bootstrappedRef = useRef(false)
   const [lastApplied, setLastApplied] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Hydrate from the latest persisted run on mount; if there's none, kick off
-  // the first turn (shape phase) automatically so the user sees something.
+  // Once the latest persisted run has finished loading, kick off the first
+  // turn if there's nothing yet so the user sees something.
   useEffect(() => {
     if (loadingState) return
-    if (bootstrapped) return
-    setBootstrapped(true)
-    if (persisted) {
-      setState(persisted)
-    } else {
+    if (bootstrappedRef.current) return
+    bootstrappedRef.current = true
+    if (!persisted) {
       void doTurn({ state: null, userMessage: null, advance: false })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingState, persisted, bootstrapped])
+  }, [loadingState, persisted])
 
   // Auto-scroll on new messages.
   useEffect(() => {
@@ -93,7 +92,7 @@ export function TicketAssistChat({
         userMessage: args.userMessage,
         advance: args.advance,
       })
-      setState(result.state)
+      setOverride(result.state)
       setReadyToAdvance(result.ready_to_advance)
       setTicket(result.ticket)
       setLastApplied(result.applied_updates.map((u) => u.field))
@@ -147,7 +146,7 @@ export function TicketAssistChat({
         },
       ],
     }
-    setState(nextState)
+    setOverride(nextState)
     setReadyToAdvance(true)
     try {
       await persistAssistState(ticket, nextState, 'pick_current_phase')
