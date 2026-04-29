@@ -44,6 +44,7 @@ import type { Ticket } from '@/types/orbit'
 export function TicketAssistPanel({
   ticket,
   onTicketChange,
+  hideActions,
 }: {
   ticket: Ticket
   // Lets the parent dialog keep its own `editing` state in sync with
@@ -51,6 +52,11 @@ export function TicketAssistPanel({
   // ticket_updates). Without this, the dialog's other field rows show
   // stale values until the next refetch — visible as a flash.
   onTicketChange?: (next: Ticket) => void
+  // When true, suppress the inline plan (ActionsSection + ShapePicker).
+  // Used when the parent renders the plan elsewhere (e.g. the dialog's
+  // left rail), so the assist panel stays focused on refining the
+  // current step without duplicating the plan.
+  hideActions?: boolean
 }) {
   const { data: persisted, loading: loadingState } = useLatestAssistState(
     ticket.id,
@@ -200,8 +206,9 @@ export function TicketAssistPanel({
   return (
     <div className="space-y-4">
       {/* Actions section lives OUTSIDE the assist panel once a phase has
-          been picked — it's the user's plan, not an assistant interaction. */}
-      {shape && currentPhase ? (
+          been picked — it's the user's plan, not an assistant interaction.
+          Hidden when the parent renders the plan itself (rail mode). */}
+      {!hideActions && shape && currentPhase ? (
         <ActionsSection
           shape={shape}
           currentPhaseId={currentPhaseId}
@@ -239,14 +246,21 @@ export function TicketAssistPanel({
           ) : null}
 
           {/* Stage 2: shape exists but no phase picked — the read-only
-              preview of phases. The picker dropdown lives in the sidebar. */}
-          {shape && !currentPhase ? (
+              preview of phases. The picker dropdown lives in the sidebar.
+              Hidden in rail mode since the rail itself shows the phases. */}
+          {!hideActions && shape && !currentPhase ? (
             <ShapePicker
               shape={shape}
               requirePick={!currentPhaseId && !isDone}
               ticket={liveTicket}
               onSetNextAction={setNextAction}
             />
+          ) : null}
+
+          {hideActions && shape && !currentPhase && !isDone ? (
+            <p className="text-xs font-medium text-primary">
+              Pick the phase you're in from the plan rail →
+            </p>
           ) : null}
 
         {/* Stage 3: structured questions, collapsed behind "Refine this phase" */}

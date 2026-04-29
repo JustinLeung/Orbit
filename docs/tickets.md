@@ -41,15 +41,18 @@ Two creation surfaces:
 
 ## The detail dialog
 
-`TicketDetailDialog` (`src/components/tickets/TicketDetailDialog.tsx`) is the central UI for an existing ticket. It hosts:
+`TicketDetailDialog` (`src/components/tickets/TicketDetailDialog.tsx`) is the central UI for an existing ticket. The header (status pill, short id, close) spans the full modal width; below it the body splits into two columns at `lg` and above:
 
-1. **Inline-editable fields** — title, description, goal, next_action, next_action_at, urgency/importance/energy, type, status, agent_mode. Each `EditableField`/`PropertyPill` calls `saveField()` which:
-   - Updates the local `editing` state optimistically.
-   - Calls `updateTicket()` with a `changedFields` array describing the prior + new value (the caller knows the prior value; the server doesn't need to).
-   - On error, rolls back by restoring `prev`.
-2. **`TicketContextSections`** — the structured-context block: definition-of-done checklist, open questions, references. Mounted directly inside the dialog so the AI assist panel and the human are looking at the same fields.
-3. **`TicketAssistPanel`** — see [assist.md](./assist.md). The panel can mutate the underlying ticket (`Set as next action`, AI-applied `ticket_updates`); it pipes those mutations back up via an `onTicketChange` prop so the dialog's other fields don't show stale values until refetch.
-4. **`TicketActivity`** — the full append-only history (see below) plus a `TicketNoteComposer`.
+- **Left rail** — `TicketPlanRail` (`src/components/tickets/TicketPlanRail.tsx`): the vertical step rail driven by assist's `shape.phases` (numbered timeline, drag-handle reorder, click to mark a phase current). The properties stack (Status / Type / Importance / Energy, Schedule, Created / Updated / Closed stamps) lives below the plan so every field stays reachable. Reorder + pick mutate assist state via `persistAssistState`; property edits route through the dialog's `saveField` (passed in as a prop).
+- **Centre** — title, description, Goal / Next action / Waiting on field rows, `CurrentStepCard` (echoes the rail's pick with category pill + action + "Set as next action"), `TicketAssistPanel` in rail mode (`hideActions` — refine flow + follow-up; plan is suppressed because the left rail owns it), `TicketContextSections` (definition-of-done / open questions / references), free-form `Context` note, and `TicketActivity` + `TicketNoteComposer`.
+
+Inline-editable fields (title, description, goal, next_action, next_action_at, urgency/importance/energy, type, status, agent_mode) all run through `saveField()` which:
+
+- Updates the local `editing` state optimistically.
+- Calls `updateTicket()` with a `changedFields` array describing the prior + new value (the caller knows the prior value; the server doesn't need to).
+- On error, rolls back by restoring `prev`.
+
+`TicketAssistPanel` can also mutate the underlying ticket (`Set as next action`, AI-applied `ticket_updates`); it pipes those mutations back up via `onTicketChange` so the dialog's other fields don't show stale values until refetch. The plan rail and the current-step card both call `useLatestAssistState` directly — they share state through the `orbit:assist-changed` window event rather than prop drilling.
 
 ## `updateTicket` and the audit log
 
@@ -65,6 +68,12 @@ Two creation surfaces:
   - everything else → `field_updated` with `{field, old, new}` payload.
 
 Event insert failures are logged but non-fatal — same convention as `createTicket`. Treat `ticket_events` as a best-effort audit log, not a transactional ledger.
+
+## Deleting a ticket
+
+`deleteTicket(id)` (`src/lib/queries.ts`) hard-deletes the row. The detail dialog exposes this via a trash icon in the header (next to close), gated by a `window.confirm`. On success the dialog closes and `notifyTicketsChanged()` fires so lists drop the row.
+
+All ticket-scoped child rows cascade via `ON DELETE CASCADE` FKs (set in migration `20260428205127_init_schema.sql`): `ticket_events`, `ticket_open_questions`, `ticket_references`, `agent_runs`, sub-issues, and any future `ticket_*` table that follows the same pattern. There is **no** soft-delete tombstone — once you delete, the audit log is gone with the ticket. If we need a soft-delete in future, add a `deleted_at` column instead of repurposing this path.
 
 ## Reading history
 

@@ -1,32 +1,20 @@
 import { useState } from 'react'
-import { Dialog } from 'radix-ui'
+import { AlertDialog, Dialog } from 'radix-ui'
 import {
-  CalendarClock,
-  CheckCircle2,
-  Circle,
-  CircleDashed,
   Clock,
   CornerDownLeft,
   Flag,
   History,
-  ListChecks,
-  PanelRightClose,
-  PanelRightOpen,
-  Sparkles,
-  XCircle,
+  Trash2,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import {
-  buildPickedPhaseState,
-  persistAssistState,
+  deleteTicket,
   updateTicket,
-  useLatestAssistState,
   type FieldChangeValue,
 } from '@/lib/queries'
-import type { ShapePhaseStatus } from '@/lib/assistTypes'
 import { EditableField } from '@/components/tickets/EditableField'
 import { TicketAssistPanel } from '@/components/tickets/TicketAssistPanel'
 import { TicketContextSections } from '@/components/tickets/TicketContextSections'
@@ -35,72 +23,29 @@ import {
   TicketNoteComposer,
 } from '@/components/tickets/TicketActivity'
 import { Textarea } from '@/components/tickets/form-helpers'
-import {
-  AGENT_MODE_OPTIONS,
-  STATUS_OPTIONS,
-  TYPE_OPTIONS,
-  SCALE_OPTIONS,
-} from '@/components/tickets/form-constants'
-import {
-  AGENT_MODE_META,
-  STATUS_META,
-  TYPE_META,
-  urgencyMeta,
-} from '@/components/tickets/status-meta'
+import { TicketPlanRail } from '@/components/tickets/TicketPlanRail'
+import { STATUS_OPTIONS } from '@/components/tickets/form-constants'
+import { STATUS_META } from '@/components/tickets/status-meta'
 import {
   PropertyMenu,
   PropertyPill,
   type PropertyMenuOption,
 } from '@/components/tickets/PropertyPill'
-import type {
-  AgentMode,
-  Ticket,
-  TicketType,
-  TicketStatus,
-  TicketUpdate,
-} from '@/types/orbit'
-
-// ── Date helpers ──────────────────────────────────────────────────────────
-
-function formatDateLong(iso: string | null) {
-  if (!iso) return null
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-}
-
-function formatDateShort(iso: string | null) {
-  if (!iso) return null
-  const d = new Date(iso)
-  const now = new Date()
-  const sameYear = d.getFullYear() === now.getFullYear()
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(sameYear ? {} : { year: 'numeric' }),
-  })
-}
-
-function isoToLocalInput(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function localInputToIso(local: string): string | null {
-  if (local === '') return null
-  const d = new Date(local)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
-}
+import type { Ticket, TicketStatus, TicketUpdate } from '@/types/orbit'
 
 function trimOrEmpty(s: string): string {
   return s.trim()
 }
 
 // ── Detail Dialog ─────────────────────────────────────────────────────────
+//
+// Three-column layout:
+//   Left  — `TicketPlanRail`: vertical step rail + properties stack.
+//   Centre — title, description, field rows, current-step card,
+//            structured context (DoD / open questions / refs), free-form
+//            context note, activity feed.
+//   Right — pinned `TicketAssistPanel` (rail mode): refine flow + ask
+//           follow-up. Plan is suppressed because the left rail owns it.
 
 export function TicketDetailDialog({
   ticket,
@@ -113,10 +58,28 @@ export function TicketDetailDialog({
 }) {
   const [editing, setEditing] = useState<Ticket | null>(ticket)
   const [trackedId, setTrackedId] = useState(ticket?.id)
-  const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   if (ticket?.id !== trackedId) {
     setTrackedId(ticket?.id)
     setEditing(ticket)
+  }
+
+  async function handleConfirmDelete() {
+    if (!editing) return
+    setDeleteError(null)
+    setDeleteBusy(true)
+    try {
+      await deleteTicket(editing.id)
+      setConfirmDeleteOpen(false)
+      setDeleteBusy(false)
+      onOpenChange(false)
+    } catch (err) {
+      console.error('delete ticket failed', err)
+      setDeleteError(err instanceof Error ? err.message : String(err))
+      setDeleteBusy(false)
+    }
   }
 
   async function saveField<K extends keyof Ticket>(
@@ -148,7 +111,7 @@ export function TicketDetailDialog({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <Dialog.Content
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(880px,92vh)] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border bg-background shadow-2xl',
+            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(880px,92vh)] w-[min(1280px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
             'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
@@ -157,57 +120,55 @@ export function TicketDetailDialog({
         >
           {editing && statusMeta ? (
             <>
-              {/* ── Main pane ─────────────────────────────────────────── */}
-              <div className="flex min-w-0 flex-1 flex-col">
-                {/* Header */}
-                <div className="flex items-center justify-between gap-3 border-b px-5 py-2.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <StatusMenu
-                      value={editing.status}
-                      onChange={(next) => {
-                        if (next === editing.status) return
-                        void saveField('status', next, { status: next }).catch(
-                          (err) =>
-                            console.error('status update failed', err),
-                        )
-                      }}
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      #{editing.short_id}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setPropertiesOpen((v) => !v)}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label={
-                        propertiesOpen
-                          ? 'Hide properties'
-                          : 'Show properties'
-                      }
-                    >
-                      {propertiesOpen ? (
-                        <PanelRightClose className="h-4 w-4" />
-                      ) : (
-                        <PanelRightOpen className="h-4 w-4" />
-                      )}
-                    </button>
-                    <Dialog.Close
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label="Close"
-                    >
-                      <X className="h-4 w-4" />
-                    </Dialog.Close>
-                  </div>
+              {/* ── Full-width header ─────────────────────────────────── */}
+              <div className="flex shrink-0 items-center gap-3 border-b px-5 py-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <StatusMenu
+                    value={editing.status}
+                    onChange={(next) => {
+                      if (next === editing.status) return
+                      void saveField('status', next, { status: next }).catch(
+                        (err) => console.error('status update failed', err),
+                      )
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    #{editing.short_id}
+                  </span>
                 </div>
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteError(null)
+                      setConfirmDeleteOpen(true)
+                    }}
+                    className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label="Delete ticket"
+                    title="Delete ticket"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <Dialog.Close
+                    className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </Dialog.Close>
+                </div>
+              </div>
 
-                <Dialog.Title className="sr-only">{editing.title}</Dialog.Title>
+              <Dialog.Title className="sr-only">{editing.title}</Dialog.Title>
 
-                {/* Scrollable body */}
-                <div className="flex-1 overflow-y-auto">
-                  <div className="mx-auto max-w-2xl px-8 py-6">
-                    {/* Title — no label, large editable heading */}
+              {/* ── Body: rails + centre ─────────────────────────────── */}
+              <div className="flex min-h-0 flex-1">
+                {/* Left rail */}
+                <TicketPlanRail ticket={editing} saveField={saveField} />
+
+                {/* Centre pane */}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex-1 overflow-y-auto">
+                  <div className="px-7 py-6">
                     <EditableField<string>
                       label=""
                       value={editing.title}
@@ -242,7 +203,6 @@ export function TicketDetailDialog({
                       readClassName="block w-full text-left text-2xl font-semibold leading-tight tracking-tight rounded-md -mx-2 px-2 py-1 hover:bg-muted/50"
                     />
 
-                    {/* Description — primary canvas */}
                     <div className="mt-3">
                       <EditableField<string | null>
                         label=""
@@ -282,7 +242,6 @@ export function TicketDetailDialog({
                       />
                     </div>
 
-                    {/* Goal */}
                     <FieldRow
                       icon={Flag}
                       label="Goal"
@@ -291,7 +250,6 @@ export function TicketDetailDialog({
                       onSave={(v) => saveField('goal', v, { goal: v })}
                     />
 
-                    {/* Next action — flagship row */}
                     <FieldRow
                       icon={CornerDownLeft}
                       label="Next action"
@@ -302,9 +260,7 @@ export function TicketDetailDialog({
                       }
                     />
 
-                    {/* Waiting on */}
-                    {(editing.status === 'waiting' ||
-                      editing.waiting_on) && (
+                    {(editing.status === 'waiting' || editing.waiting_on) && (
                       <FieldRow
                         icon={Clock}
                         label="Waiting on"
@@ -316,7 +272,8 @@ export function TicketDetailDialog({
                       />
                     )}
 
-                    {/* Assist panel — drives shape → pick phase → structured Qs → next steps inline */}
+                    {/* Assist — refine flow + follow-up. Plan is suppressed
+                        because the left rail owns it. */}
                     <div className="mt-6">
                       <TicketAssistPanel
                         ticket={editing}
@@ -325,6 +282,7 @@ export function TicketDetailDialog({
                             cur && cur.id === next.id ? next : cur,
                           )
                         }
+                        hideActions
                       />
                     </div>
 
@@ -340,7 +298,7 @@ export function TicketDetailDialog({
                       />
                     </div>
 
-                    {/* Context note (free-form) */}
+                    {/* Free-form context note */}
                     <div className="mt-6">
                       <SectionLabel>Context</SectionLabel>
                       <div className="mt-1.5">
@@ -382,7 +340,6 @@ export function TicketDetailDialog({
                       </div>
                     </div>
 
-                    {/* Activity */}
                     <div className="mt-8 border-t pt-5">
                       <div className="mb-3 flex items-center gap-2">
                         <History className="h-3.5 w-3.5 text-muted-foreground" />
@@ -392,21 +349,98 @@ export function TicketDetailDialog({
                       <TicketActivity ticketId={editing.id} />
                     </div>
                   </div>
+                  </div>
                 </div>
               </div>
-
-              {/* ── Properties sidebar ────────────────────────────────── */}
-              {propertiesOpen ? (
-                <PropertiesSidebar
-                  ticket={editing}
-                  saveField={saveField}
-                />
-              ) : null}
             </>
           ) : null}
         </Dialog.Content>
       </Dialog.Portal>
+
+      {editing ? (
+        <ConfirmDeleteDialog
+          open={confirmDeleteOpen}
+          onOpenChange={(next) => {
+            if (deleteBusy) return
+            setConfirmDeleteOpen(next)
+            if (!next) setDeleteError(null)
+          }}
+          title={editing.title}
+          busy={deleteBusy}
+          error={deleteError}
+          onConfirm={() => void handleConfirmDelete()}
+        />
+      ) : null}
     </Dialog.Root>
+  )
+}
+
+// ── ConfirmDeleteDialog ──────────────────────────────────────────────────
+//
+// Custom destructive-action confirm. Uses radix's AlertDialog so focus,
+// escape, and trap-on-modal behaviour all match the existing dialog.
+// Mounted as a sibling to the detail dialog inside the same Dialog.Root,
+// so closing the alert doesn't unmount the editor.
+
+function ConfirmDeleteDialog({
+  open,
+  onOpenChange,
+  title,
+  busy,
+  error,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  busy: boolean
+  error: string | null
+  onConfirm: () => void
+}) {
+  return (
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+        <AlertDialog.Content
+          className={cn(
+            'fixed left-1/2 top-1/2 z-[70] w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-2xl',
+            'data-[state=open]:animate-in data-[state=closed]:animate-out',
+            'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+            'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
+          )}
+        >
+          <AlertDialog.Title className="text-base font-semibold">
+            Delete this ticket?
+          </AlertDialog.Title>
+          <AlertDialog.Description className="mt-1.5 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">"{title}"</span>{' '}
+            and its activity, open questions, and references will be permanently
+            removed. This can't be undone.
+          </AlertDialog.Description>
+          {error ? (
+            <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <AlertDialog.Cancel
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50"
+              disabled={busy}
+            >
+              Cancel
+            </AlertDialog.Cancel>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={busy}
+              className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-white hover:bg-destructive/90 disabled:opacity-50"
+            >
+              {busy ? 'Deleting…' : 'Delete ticket'}
+            </button>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
   )
 }
 
@@ -506,381 +540,5 @@ function StatusMenu({
         <PropertyMenu options={options} value={value} onSelect={onChange} />
       }
     />
-  )
-}
-
-// ── Properties sidebar ────────────────────────────────────────────────────
-
-function PropertiesSidebar({
-  ticket,
-  saveField,
-}: {
-  ticket: Ticket
-  saveField: <K extends keyof Ticket>(
-    field: K,
-    next: FieldChangeValue,
-    patch: TicketUpdate,
-  ) => Promise<void>
-}) {
-  const statusMeta = STATUS_META[ticket.status]
-  const typeMeta = TYPE_META[ticket.type]
-  const urgency = urgencyMeta(ticket.urgency)
-  const importance = urgencyMeta(ticket.importance)
-  const energy = urgencyMeta(ticket.energy_required)
-  const agentMeta = AGENT_MODE_META[ticket.agent_mode]
-  const StatusIcon = statusMeta.icon
-  const TypeIcon = typeMeta.icon
-  const UrgencyIcon = urgency.icon
-  const ImportanceIcon = importance.icon
-  const EnergyIcon = energy.icon
-  const AgentIcon = agentMeta.icon
-
-  const statusOptions: PropertyMenuOption<TicketStatus>[] = STATUS_OPTIONS.map(
-    (o) => ({
-      value: o.value,
-      label: STATUS_META[o.value].label,
-      icon: STATUS_META[o.value].icon,
-      iconClass: STATUS_META[o.value].tone,
-    }),
-  )
-
-  const typeOptions: PropertyMenuOption<TicketType>[] = TYPE_OPTIONS.map(
-    (o) => ({
-      value: o.value,
-      label: TYPE_META[o.value].label,
-      icon: TYPE_META[o.value].icon,
-      iconClass: TYPE_META[o.value].tone,
-    }),
-  )
-
-  const agentOptions: PropertyMenuOption<AgentMode>[] = AGENT_MODE_OPTIONS.map(
-    (o) => ({
-      value: o.value,
-      label: AGENT_MODE_META[o.value].label,
-      icon: AGENT_MODE_META[o.value].icon,
-      iconClass: AGENT_MODE_META[o.value].tone,
-    }),
-  )
-
-  const scaleOptions = (type: 'urgency' | 'importance' | 'energy'): PropertyMenuOption<number>[] => {
-    return [
-      { value: 0, label: 'No value' },
-      ...SCALE_OPTIONS.map((n) => ({
-        value: n,
-        label:
-          type === 'energy'
-            ? n <= 2
-              ? `${n}/5 · Light`
-              : n >= 4
-                ? `${n}/5 · Heavy`
-                : `${n}/5 · Medium`
-            : n <= 2
-              ? `${n}/5 · Low`
-              : n >= 4
-                ? `${n}/5 · High`
-                : `${n}/5 · Medium`,
-      })),
-    ]
-  }
-
-  return (
-    <aside className="hidden w-[280px] shrink-0 flex-col border-l bg-muted/20 lg:flex">
-      <div className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
-        <SectionLabel>Properties</SectionLabel>
-
-        <div className="space-y-0.5">
-          <PropertyPill
-            icon={StatusIcon}
-            iconClass={statusMeta.tone}
-            label="Status"
-            value={statusMeta.label}
-            menu={
-              <PropertyMenu
-                options={statusOptions}
-                value={ticket.status}
-                onSelect={(next) => {
-                  if (next === ticket.status) return
-                  void saveField('status', next, { status: next }).catch(
-                    (err) => console.error('status update failed', err),
-                  )
-                }}
-              />
-            }
-          />
-
-          <PropertyPill
-            icon={TypeIcon}
-            iconClass={typeMeta.tone}
-            label="Type"
-            value={typeMeta.label}
-            menu={
-              <PropertyMenu
-                options={typeOptions}
-                value={ticket.type}
-                onSelect={(next) => {
-                  if (next === ticket.type) return
-                  void saveField('type', next, { type: next }).catch((err) =>
-                    console.error('type update failed', err),
-                  )
-                }}
-              />
-            }
-          />
-
-          <PropertyPill
-            icon={UrgencyIcon}
-            iconClass={urgency.tone}
-            label="Priority"
-            value={ticket.urgency != null ? urgency.label : undefined}
-            placeholder="No priority"
-            menu={
-              <PropertyMenu
-                options={scaleOptions('urgency')}
-                value={ticket.urgency ?? 0}
-                onSelect={(next) => {
-                  const v = next === 0 ? null : next
-                  void saveField('urgency', v, { urgency: v }).catch((err) =>
-                    console.error('urgency update failed', err),
-                  )
-                }}
-              />
-            }
-          />
-
-          <PropertyPill
-            icon={ImportanceIcon}
-            iconClass={importance.tone}
-            label="Importance"
-            value={ticket.importance != null ? importance.label : undefined}
-            placeholder="—"
-            menu={
-              <PropertyMenu
-                options={scaleOptions('importance')}
-                value={ticket.importance ?? 0}
-                onSelect={(next) => {
-                  const v = next === 0 ? null : next
-                  void saveField('importance', v, {
-                    importance: v,
-                  }).catch((err) =>
-                    console.error('importance update failed', err),
-                  )
-                }}
-              />
-            }
-          />
-
-          <PropertyPill
-            icon={EnergyIcon}
-            iconClass={energy.tone}
-            label="Energy"
-            value={
-              ticket.energy_required != null
-                ? `${ticket.energy_required}/5`
-                : undefined
-            }
-            placeholder="—"
-            menu={
-              <PropertyMenu
-                options={scaleOptions('energy')}
-                value={ticket.energy_required ?? 0}
-                onSelect={(next) => {
-                  const v = next === 0 ? null : next
-                  void saveField('energy_required', v, {
-                    energy_required: v,
-                  }).catch((err) =>
-                    console.error('energy update failed', err),
-                  )
-                }}
-              />
-            }
-          />
-        </div>
-
-        <div className="border-t pt-4">
-          <SectionLabel>Schedule</SectionLabel>
-          <div className="mt-1 space-y-0.5">
-            <DateRow
-              label="Due"
-              value={ticket.next_action_at}
-              onSave={(v) =>
-                saveField('next_action_at', v, { next_action_at: v })
-              }
-            />
-          </div>
-        </div>
-
-        <div className="border-t pt-4">
-          <SectionLabel>Assist</SectionLabel>
-          <div className="mt-1 space-y-0.5">
-            <PhasePill ticket={ticket} />
-            <PropertyPill
-              icon={AgentIcon}
-              iconClass={agentMeta.tone}
-              label="Mode"
-              value={agentMeta.label}
-              menu={
-                <PropertyMenu
-                  options={agentOptions}
-                  value={ticket.agent_mode}
-                  onSelect={(next) => {
-                    if (next === ticket.agent_mode) return
-                    void saveField('agent_mode', next, {
-                      agent_mode: next,
-                    }).catch((err) =>
-                      console.error('agent mode update failed', err),
-                    )
-                  }}
-                />
-              }
-            />
-            <PropertyPill
-              icon={Sparkles}
-              iconClass="text-muted-foreground"
-              label="Status"
-              value={ticket.agent_status}
-            />
-          </div>
-        </div>
-
-        <div className="border-t pt-4 text-xs text-muted-foreground">
-          <SectionLabel>Activity</SectionLabel>
-          <dl className="mt-2 space-y-1.5">
-            <Stamp label="Created" value={formatDateLong(ticket.created_at)} />
-            <Stamp label="Updated" value={formatDateLong(ticket.updated_at)} />
-            {ticket.closed_at ? (
-              <Stamp
-                label="Closed"
-                value={formatDateLong(ticket.closed_at)}
-              />
-            ) : null}
-          </dl>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-// Phase picker for the assist walkthrough — lives in the sidebar so the
-// user can switch phases without scrolling to the assist panel. Reads
-// the latest assist state independently and writes via persistAssistState
-// (the panel's hook listens to the same change event and refreshes).
-function PhasePill({ ticket }: { ticket: Ticket }) {
-  const { data: assistState } = useLatestAssistState(ticket.id)
-  const phases = assistState?.shape?.phases ?? []
-  const currentId = assistState?.position?.current_phase_id ?? null
-  const current = phases.find((p) => p.id === currentId) ?? null
-
-  const options: PropertyMenuOption<string>[] = phases.map((p) => ({
-    value: p.id,
-    label: p.title,
-    icon: PHASE_STATUS_ICON[p.status],
-    iconClass:
-      p.status === 'done' || p.status === 'in_progress'
-        ? 'text-primary'
-        : p.status === 'blocked'
-          ? 'text-destructive'
-          : 'text-muted-foreground',
-  }))
-
-  const trigger = (
-    <PropertyPill
-      icon={ListChecks}
-      iconClass="text-muted-foreground"
-      label="Phase"
-      value={current?.title}
-      placeholder={phases.length > 0 ? 'Pick a phase' : '—'}
-      disabled={phases.length === 0}
-      menu={
-        phases.length > 0 ? (
-          <PropertyMenu
-            options={options}
-            value={currentId}
-            onSelect={(next) => {
-              if (!assistState || next === currentId) return
-              const nextState = buildPickedPhaseState(assistState, next)
-              if (!nextState) return
-              void persistAssistState(
-                ticket,
-                nextState,
-                'pick_current_phase',
-              ).catch((err) =>
-                console.error('pick current phase failed', err),
-              )
-            }}
-          />
-        ) : undefined
-      }
-    />
-  )
-  return trigger
-}
-
-const PHASE_STATUS_ICON: Record<ShapePhaseStatus, LucideIcon> = {
-  done: CheckCircle2,
-  in_progress: CircleDashed,
-  blocked: XCircle,
-  not_started: Circle,
-}
-
-function Stamp({ label, value }: { label: string; value: string | null }) {
-  if (!value) return null
-  return (
-    <div className="flex items-center justify-between gap-2 px-2">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-foreground/80">{value}</dd>
-    </div>
-  )
-}
-
-function DateRow({
-  label,
-  value,
-  onSave,
-}: {
-  label: string
-  value: string | null
-  onSave: (next: string | null) => Promise<void>
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
-      <span className="flex items-center gap-2 text-xs text-muted-foreground">
-        <CalendarClock className="h-4 w-4" />
-        {label}
-      </span>
-      <EditableField<string | null>
-        label=""
-        value={value}
-        serialize={(v) => formatDateShort(v) ?? null}
-        toDraft={isoToLocalInput}
-        placeholder="No date"
-        parse={(d) => ({ ok: true, value: localInputToIso(d) })}
-        onSave={onSave}
-        commitOnChange
-        renderInput={({
-          draft,
-          setDraft,
-          onCommit,
-          commitWith,
-          onKeyDown,
-          invalid,
-          inputRef,
-        }) => (
-          <Input
-            ref={inputRef as React.Ref<HTMLInputElement>}
-            type="datetime-local"
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              commitWith(e.target.value)
-            }}
-            onBlur={onCommit}
-            onKeyDown={onKeyDown}
-            aria-invalid={invalid}
-            className="h-7 w-[180px] text-xs"
-          />
-        )}
-        readClassName="rounded px-1.5 py-0.5 text-sm hover:bg-background"
-      />
-    </div>
   )
 }
