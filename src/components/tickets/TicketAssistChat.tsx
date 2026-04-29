@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
 import {
   ArrowRight,
   CheckCircle2,
@@ -41,9 +42,11 @@ const PHASE_ORDER: AssistPhase[] = ['shape', 'position', 'next_steps', 'done']
 export function TicketAssistChat({
   ticket: initialTicket,
   onClose,
+  onPhasePicked,
 }: {
   ticket: Ticket
   onClose: () => void
+  onPhasePicked?: (ticket: Ticket) => void
 }) {
   const [ticket, setTicket] = useState<Ticket>(initialTicket)
   const { data: persisted, loading: loadingState } = useLatestAssistState(
@@ -151,6 +154,7 @@ export function TicketAssistChat({
     setReadyToAdvance(true)
     try {
       await persistAssistState(ticket, nextState, 'pick_current_phase')
+      onPhasePicked?.(ticket)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -619,7 +623,7 @@ function Bubble({
   children,
 }: {
   role: 'user' | 'assistant'
-  children: React.ReactNode
+  children: string
 }) {
   if (role === 'assistant') {
     return (
@@ -627,15 +631,49 @@ function Bubble({
         <div className="mt-0.5 rounded-full bg-primary/10 p-1">
           <Sparkles className="h-3 w-3 text-primary" aria-hidden />
         </div>
-        <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
-          {children}
+        <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <Markdown
+            components={{
+              p: (props) => <p className="my-2" {...props} />,
+              ul: (props) => (
+                <ul className="my-2 list-disc space-y-0.5 pl-5" {...props} />
+              ),
+              ol: (props) => (
+                <ol className="my-2 list-decimal space-y-0.5 pl-5" {...props} />
+              ),
+              li: (props) => <li className="leading-snug" {...props} />,
+              strong: (props) => (
+                <strong className="font-semibold" {...props} />
+              ),
+              em: (props) => <em className="italic" {...props} />,
+              code: (props) => (
+                <code
+                  className="rounded bg-muted px-1 py-0.5 text-[0.85em] font-mono"
+                  {...props}
+                />
+              ),
+              h1: (props) => <h3 className="my-2 font-semibold" {...props} />,
+              h2: (props) => <h3 className="my-2 font-semibold" {...props} />,
+              h3: (props) => <h3 className="my-2 font-semibold" {...props} />,
+              a: (props) => (
+                <a
+                  className="text-primary underline underline-offset-2"
+                  target="_blank"
+                  rel="noreferrer"
+                  {...props}
+                />
+              ),
+            }}
+          >
+            {children}
+          </Markdown>
         </div>
       </div>
     )
   }
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+      <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
         {children}
       </div>
     </div>

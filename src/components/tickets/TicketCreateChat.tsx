@@ -21,12 +21,14 @@ export function TicketCreateChat({
   onOpenChange,
   onCreated,
   onSwitchToManual,
+  onPhasePicked,
   defaultStatus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated?: (ticket: Ticket) => void
   onSwitchToManual: (prefill?: { title?: string }) => void
+  onPhasePicked?: (ticket: Ticket) => void
   defaultStatus?: TicketStatus
 }) {
   const [initial, setInitial] = useState('')
@@ -111,6 +113,7 @@ export function TicketCreateChat({
             <TicketAssistChat
               ticket={ticket}
               onClose={() => onOpenChange(false)}
+              onPhasePicked={onPhasePicked}
             />
           ) : (
             <InitialInput

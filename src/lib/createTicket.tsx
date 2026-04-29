@@ -12,10 +12,12 @@ import {
   type TicketCreatePrefill,
 } from '@/components/tickets/TicketCreateDialog'
 import { TicketCreateChat } from '@/components/tickets/TicketCreateChat'
-import type { TicketStatus } from '@/types/orbit'
+import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
+import type { Ticket, TicketStatus } from '@/types/orbit'
 
 type CreateTicketContextValue = {
   openCreate: (defaultStatus?: TicketStatus) => void
+  openDetail: (ticket: Ticket) => void
 }
 
 const CreateTicketContext = createContext<CreateTicketContextValue | undefined>(
@@ -32,6 +34,7 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
   const [manualPrefill, setManualPrefill] = useState<
     TicketCreatePrefill | undefined
   >(undefined)
+  const [viewing, setViewing] = useState<Ticket | null>(null)
 
   const openCreate = useCallback((status?: TicketStatus) => {
     setDefaultStatus(status)
@@ -47,6 +50,19 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
   const closeAll = useCallback(() => {
     setMode('closed')
     setManualPrefill(undefined)
+  }, [])
+
+  const openDetail = useCallback((ticket: Ticket) => {
+    setViewing(ticket)
+  }, [])
+
+  // Once the user anchors the loop to a phase in the walkthrough it's no
+  // longer a draft — close the creation modal and surface the ticket in
+  // its regular detail view, where the walkthrough can still be resumed.
+  const handlePhasePicked = useCallback((ticket: Ticket) => {
+    setMode('closed')
+    setManualPrefill(undefined)
+    setViewing(ticket)
   }, [])
 
   // Global "n" shortcut to start ticket capture — ignored while typing.
@@ -71,7 +87,10 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [openCreate])
 
-  const value = useMemo(() => ({ openCreate }), [openCreate])
+  const value = useMemo(
+    () => ({ openCreate, openDetail }),
+    [openCreate, openDetail],
+  )
 
   return (
     <CreateTicketContext.Provider value={value}>
@@ -82,6 +101,7 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
           if (!open) closeAll()
         }}
         onSwitchToManual={switchToManual}
+        onPhasePicked={handlePhasePicked}
         defaultStatus={defaultStatus}
       />
       <TicketCreateDialog
@@ -91,6 +111,13 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
         }}
         defaultStatus={defaultStatus}
         prefill={manualPrefill}
+      />
+      <TicketDetailDialog
+        ticket={viewing}
+        open={viewing !== null}
+        onOpenChange={(open) => {
+          if (!open) setViewing(null)
+        }}
       />
     </CreateTicketContext.Provider>
   )
