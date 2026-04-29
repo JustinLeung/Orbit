@@ -31,6 +31,9 @@ function phase(
     category,
     action: action ?? title,
     action_details: null,
+    // Templates pre-date per-phase DoD; refine turns will populate this
+    // once the user starts working the phase.
+    definition_of_done: [],
   }
 }
 

@@ -52,6 +52,7 @@ A phase has:
 - status — not_started | in_progress | done | blocked
 - action — REQUIRED. One concrete imperative the user can do for this phase. Always populate. After refine, this is what the user will likely set as their next_action.
 - action_details — optional clarification ("Ask for May 18, capacity 80")
+- definition_of_done — REQUIRED. 2-4 concrete completion checks for THIS phase, each as { item, done }. Phrase each item as a verifiable signal ("Three quotes received", "Sam approves the numbers", "Bulb bought") — NOT another action verb. Status flips to true only when the user confirms it. Always emit during shape (initialize all done: false unless the ticket already shows the item is satisfied). During refine, preserve existing items and update done flags as the user reports progress; you may rewrite or add an item only if the user reveals a new constraint. Even single-step shapes carry per-phase DoD.
 
 Phase categories (apply to phases AND inform tone): planning, research, doing, waiting, deciding, closing. Pick the one that best matches the *primary* nature of that phase's work. During refine, the prompt will include a "Playbook for the current phase" block that tells you what completion looks like for that category and which kinds of help to prioritize — follow it.
 
@@ -68,7 +69,7 @@ Cross-cutting:
     * next_action_at — ONLY if the user has explicitly stated a date or time (e.g. "the wedding is May 18", "Sam needs it by Friday"). Never guess. Output as ISO 8601 (with timezone if known, otherwise local-naive is fine, e.g. "2026-05-18T16:00").
     * type — only if the loop is clearly 'research', 'decision', 'follow_up', 'admin', or 'relationship' rather than the default 'task'
     * context — ALWAYS write relevant details here whenever the user provides them. This is the persistent "details section" of the ticket — the durable record of every concrete fact the user has shared (people, dates, venues, addresses, links, budget, constraints, decisions, dress codes, preferences, anything specific). Append-style: preserve everything already in context, and add the new facts in a clean, readable format (short labelled lines or a tight bulleted list). Do NOT drop existing details. Do NOT paraphrase facts away. If the user mentioned even one new concrete detail this turn, include an updated context value. Only omit context when the turn truly contained no new factual detail.
-    * definition_of_done — full-list replace. Concrete completion criteria as { item, done } pairs. Best populated during shape phase when you articulate completion_criteria. If the user mentions something is already done, set done: true. Only output when you can write a meaningfully better list than what's currently there; otherwise omit.
+    * definition_of_done — full-list replace, applied to the OVERALL ticket. Concrete completion criteria as { item, done } pairs. **REQUIRED during the shape turn** — emit a 2-5 item list that mirrors the shape's completion_criteria so the ticket carries an overall DoD as soon as scoping happens. If the ticket already has a DoD that's still accurate, you may re-emit it unchanged. During refine: only output when you have a meaningfully better list (e.g. user confirmed an item is done, or a new criterion emerged). If the user mentions something is already done, set done: true.
     * open_questions_to_add — APPEND-ONLY list of strings. Use this when you ask a clarifying question or surface an unknown the user can't immediately answer. Phrase as a question. Don't re-add questions already in the ticket's open_questions (they're shown to you).
     * references_to_add — APPEND-ONLY list of typed pointers to source material the user mentions (URLs, document titles, email subjects, file names). Each entry is { kind, url_or_text, label?: string }. kind ∈ 'link' | 'snippet' | 'attachment' | 'email' | 'other'. Don't re-add references already shown to you.
 - NEVER invent names, dates, or facts. Use the user's own words where possible.
@@ -97,8 +98,25 @@ const phaseSchema = {
     },
     action: { type: Type.STRING },
     action_details: { type: Type.STRING, nullable: true },
+    // Per-phase DoD: 2-4 concrete checks for THIS phase. Required at
+    // shape time. During refine, flip items to done as the user reports
+    // progress; you may also add or rewrite items if the user reveals
+    // new constraints.
+    definition_of_done: {
+      type: Type.ARRAY,
+      description:
+        '2-4 concrete completion checks for this phase. Each item phrased as a verifiable signal ("Three quotes received", "Sam approves the numbers"). Required during shape; preserve and update during refine.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          item: { type: Type.STRING },
+          done: { type: Type.BOOLEAN },
+        },
+        required: ['item', 'done'],
+      },
+    },
   },
-  required: ['id', 'title', 'status', 'category', 'action'],
+  required: ['id', 'title', 'status', 'category', 'action', 'definition_of_done'],
 }
 
 const responseSchema = {
@@ -565,13 +583,35 @@ function sanitizeSuggestedSteps(
   return out
 }
 
-// Normalizes a shape coming back from the model so suggested_steps is
-// always present (even when the model omitted it) and validated. Old
-// persisted shapes also lack the field — use this when reading any Shape
-// from the wire.
+// Sanitize per-phase DoD: drop entries with empty `item`, coerce `done`
+// to a boolean. Caps at 8 items defensively so a runaway list can't
+// bloat persisted state.
+function sanitizePhaseDod(raw: unknown): Array<{ item: string; done: boolean }> {
+  if (!Array.isArray(raw)) return []
+  const out: Array<{ item: string; done: boolean }> = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as { item?: unknown; done?: unknown }
+    if (typeof e.item !== 'string' || e.item.trim() === '') continue
+    out.push({ item: e.item.trim(), done: e.done === true })
+    if (out.length >= 8) break
+  }
+  return out
+}
+
+// Normalizes a shape coming back from the model so suggested_steps and
+// every phase's definition_of_done are always present (even when the
+// model omitted them) and validated. Old persisted shapes also lack
+// these fields — use this when reading any Shape from the wire.
 function normalizeShape(raw: Shape | null | undefined): Shape | null {
   if (!raw) return null
-  const phases = Array.isArray(raw.phases) ? raw.phases : []
+  const rawPhases = Array.isArray(raw.phases) ? raw.phases : []
+  const phases = rawPhases.map((p) => ({
+    ...p,
+    definition_of_done: sanitizePhaseDod(
+      (p as { definition_of_done?: unknown }).definition_of_done,
+    ),
+  }))
   return {
     goal: raw.goal ?? null,
     phases,

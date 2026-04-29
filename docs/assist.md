@@ -54,6 +54,10 @@ type AssistState = {
       category: 'planning' | 'research' | 'doing' | 'waiting' | 'deciding' | 'closing'
       action: string | null         // REQUIRED in practice — the imperative for this phase
       action_details: string | null
+      // 2-4 verifiable completion checks for THIS phase. Required at
+      // shape time so every phase has its own DoD bar; refine turns
+      // flip items to done as the user reports progress.
+      definition_of_done: Array<{ item: string; done: boolean }>
     }>
     completion_criteria: string[]
     inputs_needed: string[]
@@ -83,6 +87,33 @@ type AssistState = {
 6. Writes a fresh `agent_runs` row containing the new `AssistState` (JSON-stringified into `output`). Latest row = current state. See "Why agent_runs holds state" below.
 7. Writes an `agent_ran` event into `ticket_events` with `{ agent: 'walkthrough', phase, applied_field_count }`.
 8. Fires `orbit:assist-changed` so the panel + activity timeline refresh.
+
+## Two-tier definition of done
+
+After the initial shape turn, every ticket carries DoD at **two levels**:
+
+- **Ticket-level DoD** (`tickets.definition_of_done` jsonb) — the
+  overall completion bar for the loop. The model is required to emit
+  this via `ticket_updates.definition_of_done` during the shape turn,
+  mirroring the shape's `completion_criteria`. Editable inline from the
+  ticket detail dialog (`TicketContextSections`).
+- **Per-phase DoD** (`shape.phases[*].definition_of_done`) — 2-4
+  verifiable checks specific to that phase. Required on every phase at
+  shape time. The user can tick items off without going through the
+  model via `togglePhaseDodItem` in `src/lib/queries.ts`, which writes
+  a fresh `agent_runs` row + `agent_ran` event so history stays
+  consistent. Refine turns can also flip items by re-emitting the
+  phase's DoD with `done: true`.
+
+Rendering:
+- The plan rail (`TicketPlanRail`) shows a small `done/total` badge
+  next to each phase's category pill so progress is visible at a
+  glance.
+- Inline mode (`TicketAssistPanel.PhaseRow`) shows a compact checklist
+  under each phase's action.
+- Rail mode (the panel itself) renders the full checklist for the
+  current phase in the assist section, since `ActionsSection` isn't
+  the place phases are listed.
 
 ## Why `agent_runs` holds the state
 

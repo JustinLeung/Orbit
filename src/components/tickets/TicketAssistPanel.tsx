@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import {
   markAssistBootstrapped,
   runAssistTurn,
+  togglePhaseDodItem,
   updateTicket,
   useLatestAssistState,
 } from '@/lib/queries'
@@ -210,11 +211,12 @@ export function TicketAssistPanel({
       {/* Actions section lives OUTSIDE the assist panel once a phase has
           been picked — it's the user's plan, not an assistant interaction.
           Hidden when the parent renders the plan itself (rail mode). */}
-      {!hideActions && shape && currentPhase ? (
+      {!hideActions && shape && currentPhase && state ? (
         <ActionsSection
           shape={shape}
           currentPhaseId={currentPhaseId}
           ticket={liveTicket}
+          state={state}
           onSetNextAction={setNextAction}
           onRefine={
             busy || isDone ? undefined : () => setRefiningOpen(true)
@@ -250,11 +252,12 @@ export function TicketAssistPanel({
           {/* Stage 2: shape exists but no phase picked — the read-only
               preview of phases. The picker dropdown lives in the sidebar.
               Hidden in rail mode since the rail itself shows the phases. */}
-          {!hideActions && shape && !currentPhase ? (
+          {!hideActions && shape && !currentPhase && state ? (
             <ShapePicker
               shape={shape}
               requirePick={!currentPhaseId && !isDone}
               ticket={liveTicket}
+              state={state}
               onSetNextAction={setNextAction}
             />
           ) : null}
@@ -263,6 +266,19 @@ export function TicketAssistPanel({
             <p className="text-xs font-medium text-primary">
               Pick the phase you're in from the plan rail →
             </p>
+          ) : null}
+
+          {/* Per-phase DoD checklist for the current phase. Only rendered
+              in rail mode — when ActionsSection is hidden, the per-phase
+              DoD wouldn't otherwise have a home in the panel. Inline
+              mode shows DoD inside each PhaseRow already. Toggle goes
+              through persistAssistState — no model call. */}
+          {hideActions && currentPhase && currentPhase.definition_of_done.length > 0 && state ? (
+            <PhaseDodChecklist
+              ticket={liveTicket}
+              state={state}
+              phase={currentPhase}
+            />
           ) : null}
 
         {/* Stage 3: structured questions, collapsed behind "Refine this phase" */}
@@ -422,6 +438,7 @@ function ActionsSection({
   shape,
   currentPhaseId,
   ticket,
+  state,
   onSetNextAction,
   onRefine,
   refineActive,
@@ -429,6 +446,7 @@ function ActionsSection({
   shape: NonNullable<AssistState['shape']>
   currentPhaseId: string | null
   ticket: Ticket
+  state: AssistState
   onSetNextAction: (title: string) => void
   onRefine?: () => void
   refineActive: boolean
@@ -446,6 +464,7 @@ function ActionsSection({
         phase={p}
         isCurrent={isCurrent}
         ticket={ticket}
+        state={state}
         onSetNextAction={onSetNextAction}
         onRefine={isCurrent && !refineActive ? onRefine : undefined}
       />
@@ -485,11 +504,13 @@ function ShapePicker({
   shape,
   requirePick,
   ticket,
+  state,
   onSetNextAction,
 }: {
   shape: NonNullable<AssistState['shape']>
   requirePick: boolean
   ticket: Ticket
+  state: AssistState
   onSetNextAction: (title: string) => void
 }) {
   return (
@@ -506,6 +527,7 @@ function ShapePicker({
             phase={p}
             isCurrent={false}
             ticket={ticket}
+            state={state}
             onSetNextAction={onSetNextAction}
           />
         ))}
@@ -535,12 +557,14 @@ function PhaseRow({
   phase,
   isCurrent,
   ticket,
+  state,
   onSetNextAction,
   onRefine,
 }: {
   phase: ShapePhaseEntry
   isCurrent: boolean
   ticket: Ticket
+  state: AssistState
   onSetNextAction: (title: string) => void
   onRefine?: () => void
 }) {
@@ -623,7 +647,89 @@ function PhaseRow({
           </div>
         </div>
       ) : null}
+      {phase.definition_of_done.length > 0 ? (
+        <div className="mt-1.5 pl-5">
+          <PhaseDodChecklist ticket={ticket} state={state} phase={phase} compact />
+        </div>
+      ) : null}
     </li>
+  )
+}
+
+// Per-phase DoD checklist. Compact mode (used inside PhaseRow) drops
+// the section header so the row stays scannable; the full version
+// (used at the assist panel level for the current phase) keeps the
+// "Definition of done" label so the user knows what they're ticking.
+function PhaseDodChecklist({
+  ticket,
+  state,
+  phase,
+  compact,
+}: {
+  ticket: Ticket
+  state: AssistState
+  phase: ShapePhaseEntry
+  compact?: boolean
+}) {
+  const [busyIdx, setBusyIdx] = useState<number | null>(null)
+  const items = phase.definition_of_done
+  if (items.length === 0) return null
+  const doneCount = items.filter((d) => d.done).length
+
+  async function toggle(i: number) {
+    if (busyIdx !== null) return
+    setBusyIdx(i)
+    try {
+      await togglePhaseDodItem(ticket, state, phase.id, i)
+    } catch (err) {
+      console.error('toggle phase dod failed', err)
+    } finally {
+      setBusyIdx(null)
+    }
+  }
+
+  return (
+    <div className={cn('space-y-1', compact ? '' : 'rounded-md border bg-background/40 px-2.5 py-2')}>
+      {!compact ? (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Definition of done · this phase
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            {doneCount}/{items.length}
+          </span>
+        </div>
+      ) : null}
+      <ul className="space-y-0.5">
+        {items.map((d, i) => (
+          <li key={`${phase.id}-${i}`} className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={() => void toggle(i)}
+              disabled={busyIdx !== null}
+              aria-pressed={d.done}
+              className={cn(
+                'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors',
+                d.done
+                  ? 'border-emerald-500 bg-emerald-500 text-white'
+                  : 'border-muted-foreground/40 bg-background hover:border-foreground/60',
+              )}
+              aria-label={d.done ? `Mark "${d.item}" not done` : `Mark "${d.item}" done`}
+            >
+              {d.done ? <CheckCircle2 className="h-3 w-3" /> : null}
+            </button>
+            <span
+              className={cn(
+                'text-[12px] leading-snug',
+                d.done && 'text-muted-foreground line-through decoration-muted-foreground/40',
+              )}
+            >
+              {d.item}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

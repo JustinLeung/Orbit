@@ -721,6 +721,94 @@ describe('POST /api/assist/walkthrough', () => {
       expect(res.body.state.shape.suggested_steps).toEqual([])
     })
 
+    it('system prompt requires per-phase definition_of_done AND ticket-level definition_of_done at shape time', async () => {
+      // Fast-path classifier runs first, then the main model — assert
+      // against the main model's systemInstruction.
+      process.env.GEMINI_API_KEY = 'k'
+      mockClassifierFallthrough()
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({ assistant_message: 'ok' }),
+      })
+      const app = await makeApp()
+      await request(app).post('/api/assist/walkthrough').send({ ticket: TICKET })
+      const call = generateContent.mock.calls[1][0]
+      const systemInstruction = call.config.systemInstruction as string
+      // Per-phase DoD must be required on every phase.
+      expect(systemInstruction).toMatch(/definition_of_done.*REQUIRED/i)
+      expect(systemInstruction).toMatch(/2-4 concrete completion checks/i)
+      // Ticket-level DoD must be required during shape.
+      expect(systemInstruction).toMatch(/REQUIRED during the shape turn/i)
+    })
+
+    it('backfills empty definition_of_done on phases when the model omitted them', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      mockClassifierFallthrough()
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          shape: {
+            goal: null,
+            phases: [
+              {
+                id: 'p1',
+                title: 'P1',
+                description: null,
+                status: 'not_started',
+                category: 'doing',
+                action: 'Do it',
+                // definition_of_done omitted on purpose
+              },
+            ],
+            completion_criteria: [],
+            inputs_needed: [],
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      expect(res.body.state.shape.phases[0].definition_of_done).toEqual([])
+    })
+
+    it('passes through per-phase definition_of_done when the model emits it', async () => {
+      process.env.GEMINI_API_KEY = 'k'
+      mockClassifierFallthrough()
+      generateContent.mockResolvedValueOnce({
+        text: JSON.stringify({
+          assistant_message: 'ok',
+          shape: {
+            goal: null,
+            phases: [
+              {
+                id: 'p1',
+                title: 'P1',
+                description: null,
+                status: 'not_started',
+                category: 'doing',
+                action: 'Do it',
+                definition_of_done: [
+                  { item: 'Got the thing', done: false },
+                  { item: 'Sent it to Sam', done: false },
+                  { item: '   ', done: false }, // empty item — sanitized out
+                ],
+              },
+            ],
+            completion_criteria: [],
+            inputs_needed: [],
+          },
+        }),
+      })
+      const app = await makeApp()
+      const res = await request(app)
+        .post('/api/assist/walkthrough')
+        .send({ ticket: TICKET, state: null })
+      expect(res.body.state.shape.phases[0].definition_of_done).toEqual([
+        { item: 'Got the thing', done: false },
+        { item: 'Sent it to Sam', done: false },
+      ])
+    })
+
     it('system prompt teaches the model to emit optional adjacent steps', async () => {
       // We don't hit the model; we just assert the systemInstruction passed
       // to the SDK contains the suggested_steps contract. Fast-path
