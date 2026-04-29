@@ -6,7 +6,15 @@ Every commitment becomes a ticket with a state, next action, history, and option
 
 > **Tagline:** Keep every open loop in motion.
 
-See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec.
+See [`PLAN.md`](./PLAN.md) for the full MVP product and data-model spec, and
+[`docs/`](./docs) for per-area "how it works" guides
+([architecture](./docs/architecture.md),
+[auth](./docs/auth.md),
+[tickets](./docs/tickets.md),
+[assist](./docs/assist.md),
+[server-api](./docs/server-api.md),
+[database](./docs/database.md),
+[frontend](./docs/frontend.md)).
 
 ---
 
