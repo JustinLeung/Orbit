@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ArrowRightLeft,
   CheckCircle2,
@@ -9,8 +10,9 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
-import { useTicketEvents } from '@/lib/queries'
+import { addTicketNote, useTicketEvents } from '@/lib/queries'
 import { STATUS_META } from '@/components/tickets/status-meta'
+import { Textarea } from '@/components/tickets/form-helpers'
 import type { TicketEvent, TicketEventType, TicketStatus } from '@/types/orbit'
 import { cn } from '@/lib/utils'
 
@@ -103,6 +105,11 @@ function eventMeta(type: TicketEventType): {
     default:
       return FALLBACK_META
   }
+}
+
+function noteBody(event: TicketEvent): string | null {
+  if (event.event_type !== 'note_added') return null
+  return asString(payloadOf(event)?.body)
 }
 
 function describe(event: TicketEvent): React.ReactNode {
@@ -214,6 +221,7 @@ export function TicketActivity({ ticketId }: { ticketId: string }) {
       {ordered.map((evt) => {
         const meta = eventMeta(evt.event_type)
         const Icon = meta.icon
+        const note = noteBody(evt)
         return (
           <li key={evt.id} className="relative flex items-start gap-2.5 pl-1">
             <span className="z-10 mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-background">
@@ -228,10 +236,81 @@ export function TicketActivity({ ticketId }: { ticketId: string }) {
               >
                 · {relativeTime(evt.created_at)}
               </time>
+              {note ? (
+                <p className="mt-1 whitespace-pre-wrap rounded-md border bg-muted/30 px-2.5 py-1.5 text-sm text-foreground">
+                  {note}
+                </p>
+              ) : null}
             </div>
           </li>
         )
       })}
     </ol>
+  )
+}
+
+// ── Note composer ─────────────────────────────────────────────────────────
+
+export function TicketNoteComposer({ ticketId }: { ticketId: string }) {
+  const [body, setBody] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const trimmed = body.trim()
+  const canSubmit = trimmed.length > 0 && !submitting
+
+  async function submit() {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await addTicketNote(ticketId, trimmed)
+      setBody('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add note')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mb-3">
+      <Textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            void submit()
+          }
+        }}
+        rows={2}
+        placeholder="Add a note…"
+        aria-label="Add a note"
+        disabled={submitting}
+      />
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">
+          {error ? (
+            <span className="text-destructive">{error}</span>
+          ) : (
+            <>⌘/Ctrl + Enter to submit</>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!canSubmit}
+          className={cn(
+            'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+            canSubmit
+              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+              : 'cursor-not-allowed bg-muted text-muted-foreground',
+          )}
+        >
+          {submitting ? 'Adding…' : 'Add note'}
+        </button>
+      </div>
+    </div>
   )
 }

@@ -856,12 +856,48 @@ export async function deleteReference(id: string): Promise<void> {
 
 // ── ticket_events ────────────────────────────────────────────────────────
 
+const TICKET_EVENTS_CHANGED_EVENT = 'orbit:ticket-events-changed'
+function notifyTicketEventsChanged() {
+  window.dispatchEvent(new CustomEvent(TICKET_EVENTS_CHANGED_EVENT))
+}
+
+// Inserts a `note_added` event with `{body}` payload. Notes don't change
+// the ticket itself, so we use a dedicated refresh event instead of
+// TICKETS_CHANGED_EVENT (which would re-fetch ticket lists for nothing).
+export async function addTicketNote(
+  ticketId: string,
+  body: string,
+): Promise<TicketEvent> {
+  const trimmed = body.trim()
+  if (!trimmed) throw new Error('Note body is empty')
+
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) throw authErr
+  const userId = auth.user?.id
+  if (!userId) throw new Error('Not signed in')
+
+  const { data, error } = await supabase
+    .from('ticket_events')
+    .insert({
+      user_id: userId,
+      ticket_id: ticketId,
+      event_type: 'note_added',
+      payload: { body: trimmed },
+    })
+    .select()
+    .single()
+  if (error) throw error
+  notifyTicketEventsChanged()
+  return data
+}
+
 // Pulls the ticket's append-only audit log in chronological order. Callers
 // that want newest-first display reverse it themselves (TicketActivity does
 // this — see its comment). Pass null to keep the hook idle (e.g. while the
 // detail dialog is closed). Refreshes on the global events driven by flows
 // that write into ticket_events: ticket field updates / status transitions
-// (TICKETS_CHANGED_EVENT) and assist runs (ASSIST_CHANGED_EVENT).
+// (TICKETS_CHANGED_EVENT), assist runs (ASSIST_CHANGED_EVENT), and notes
+// (TICKET_EVENTS_CHANGED_EVENT).
 export function useTicketEvents(ticketId: string | null) {
   const [state, dispatch] = useReducer(
     fetchReducer as Reducer<
@@ -904,9 +940,11 @@ export function useTicketEvents(ticketId: string | null) {
     }
     window.addEventListener(TICKETS_CHANGED_EVENT, refresh)
     window.addEventListener(ASSIST_CHANGED_EVENT, refresh)
+    window.addEventListener(TICKET_EVENTS_CHANGED_EVENT, refresh)
     return () => {
       window.removeEventListener(TICKETS_CHANGED_EVENT, refresh)
       window.removeEventListener(ASSIST_CHANGED_EVENT, refresh)
+      window.removeEventListener(TICKET_EVENTS_CHANGED_EVENT, refresh)
     }
   }, [])
 

@@ -333,7 +333,9 @@ keeps using `npm run seed` with its own custom data.
   you can leave the ticket at any time and pick up where you left off
   from the embedded assist panel. New tickets capture title-only and
   route straight into the detail dialog.
-- [ ] Ticket detail view with history (`ticket_events` rendered in the dialog)
+- [x] Ticket detail view with history (`ticket_events` rendered in the
+  dialog) plus a note composer that appends `note_added` events — see
+  ORB-9 and ORB-10
 - [x] Status transitions (header dropdown + per-row quick action; emits
   `status_changed` events with `{from, to}` payload and auto-manages
   `closed_at`) — see ORB-8

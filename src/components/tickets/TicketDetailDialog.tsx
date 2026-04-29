@@ -17,7 +17,10 @@ import { updateTicket, type FieldChangeValue } from '@/lib/queries'
 import { EditableField } from '@/components/tickets/EditableField'
 import { TicketAssistPanel } from '@/components/tickets/TicketAssistPanel'
 import { TicketContextSections } from '@/components/tickets/TicketContextSections'
-import { TicketActivity } from '@/components/tickets/TicketActivity'
+import {
+  TicketActivity,
+  TicketNoteComposer,
+} from '@/components/tickets/TicketActivity'
 import { Textarea } from '@/components/tickets/form-helpers'
 import {
   AGENT_MODE_OPTIONS,
@@ -372,6 +375,7 @@ export function TicketDetailDialog({
                         <History className="h-3.5 w-3.5 text-muted-foreground" />
                         <SectionLabel>Activity</SectionLabel>
                       </div>
+                      <TicketNoteComposer ticketId={editing.id} />
                       <TicketActivity ticketId={editing.id} />
                     </div>
                   </div>
