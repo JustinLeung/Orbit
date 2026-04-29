@@ -141,7 +141,7 @@ export function TicketDetailDialog({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <Dialog.Content
           className={cn(
-            'fixed inset-3 z-50 flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl sm:inset-6 lg:inset-10',
+            'fixed left-1/2 top-1/2 z-50 flex max-h-[min(820px,90vh)] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
             'data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95',
@@ -150,30 +150,28 @@ export function TicketDetailDialog({
         >
           {editing ? (
             <>
-              <div className="border-b">
-                <div className="mx-auto flex w-full max-w-3xl items-start justify-between gap-4 px-6 py-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {TYPE_LABEL[editing.type]}
-                      </span>
-                      <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {STATUS_LABEL[editing.status]}
-                      </span>
-                    </div>
+              <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {TYPE_LABEL[editing.type]}
+                    </span>
+                    <span className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {STATUS_LABEL[editing.status]}
+                    </span>
                   </div>
-                  <Dialog.Close
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label="Close"
-                  >
-                    <X className="h-4 w-4" />
-                  </Dialog.Close>
                 </div>
+                <Dialog.Close
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </Dialog.Close>
               </div>
 
               <Dialog.Title className="sr-only">{editing.title}</Dialog.Title>
 
-              <div className="flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-6">
+              <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
                 <TicketAssistView ticket={editing} />
 
                 <EditableField<string>
@@ -468,7 +466,6 @@ export function TicketDetailDialog({
                     </ReadOnlyField>
                   ) : null}
                 </div>
-              </div>
               </div>
             </>
           ) : null}
