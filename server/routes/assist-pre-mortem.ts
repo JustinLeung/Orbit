@@ -3,24 +3,33 @@ import { Type } from '@google/genai'
 import { getGemini, GEMINI_MODEL } from '../lib/gemini.js'
 import type { TicketSnapshot } from '../lib/assistTypes.js'
 
-// "Pre-mortem" — a one-shot Gemini call that asks "what could go wrong?"
-// and returns a list of risks phrased as questions. Distinct from the
+// Blind-spots helper — a one-shot Gemini call that surfaces 3-5
+// "things people often miss" for a planned open loop, phrased as
+// questions the user can capture as open_questions. Distinct from the
 // /walkthrough route because it's NOT part of the rolling shape→refine
 // state machine: it never mutates AssistState, and the user accepts
-// proposals individually (each becomes an `addOpenQuestion` call on the
-// client). Gating: the panel only fires this when the user explicitly
-// clicks "Run pre-mortem" — never auto-runs.
+// proposals individually (each becomes an `addOpenQuestion` call on
+// the client). Gating: the panel only fires this when the user
+// explicitly clicks "Surface blind spots" — never auto-runs.
+//
+// Framing note: we deliberately DON'T frame this as failure-mode /
+// "what could go wrong" / pre-mortem. For solo productivity, "what
+// did you forget" lands better than "imagine you failed" — same
+// mechanic, less catastrophizing. The endpoint is named
+// /assist/pre-mortem for backwards compatibility, but the prompt and
+// UI both speak in "blind spots / oversights / things people forget"
+// language.
 
 const router = Router()
 
-const SYSTEM_INSTRUCTION = `You are Orbit's "pre-mortem" helper. The user has just sketched a plan for an open loop. Your job is to surface 3-5 risks worth catching BEFORE they bite.
+const SYSTEM_INSTRUCTION = `You are Orbit's "blind spots" helper. The user has just sketched a plan for an open loop. Your job is to surface 3-5 things people commonly forget or overlook for THIS kind of loop — pieces of the picture that are easy to miss, NOT predictions of failure.
 
 Output rules:
-- Each risk MUST be phrased AS A QUESTION (something the user could realistically not have thought about yet). Examples: "What if the venue cancels last-minute?", "What happens if Sam doesn't reply by Friday?", "Are we sure the budget covers tax and tip?".
-- 3-5 risks. Quality over quantity. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
-- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Don't emit generic risks like "What if something goes wrong?".
-- Cover a spread: at least one of {dependency on a person}, {timing/deadline}, {budget/resources}, {scope/quality}, {failure recovery} where the ticket gives you fodder.
-- Tone: brief, neutral. Never alarmist. The user picks which to capture.
+- Each item MUST be phrased AS A QUESTION the user could realistically not have considered yet. Use neutral, curious phrasing — NOT alarmist or failure-framed. Good: "Have you thought about who's actually attending vs invited?" / "Is the budget per-person or total?" / "Where's the marriage license going to come from?". Bad: "What if everyone cancels?" / "What if you fail?" / "What could go wrong?".
+- 3-5 items. Quality over quantity. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
+- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Don't emit generic items like "Have you thought about everything?".
+- Cover a spread of "things people forget" where the ticket gives you fodder: {logistics/details easy to skip}, {someone whose input matters}, {a dependency the user hasn't named}, {a constraint they haven't set yet}, {something that has to happen alongside the plan but isn't a phase}.
+- Tone: warm, helpful, like a thoughtful friend who's done this before. Never anxious or alarmist. The user picks which to capture.
 - NEVER invent facts (names, dates, dollar amounts not in the ticket). Use the user's own words where possible.`
 
 const responseSchema = {
@@ -110,7 +119,7 @@ function buildPrompt(
   }
   lines.push(
     '',
-    'Now produce 3-5 risks phrased as questions. Specific to this ticket. Cover a spread of dependency / timing / budget / scope / recovery where there is fodder.',
+    "Now produce 3-5 things people commonly miss for THIS kind of loop, phrased as warm, curious questions. Specific to this ticket. Cover a spread where there's fodder: a logistics detail that's easy to skip, a person whose input matters, an unnamed dependency, a constraint not yet set, or something that has to happen alongside the plan.",
   )
   return lines.join('\n')
 }

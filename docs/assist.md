@@ -12,7 +12,7 @@ Goal: turn "this open loop is fuzzy" into "here's the concrete next thing I'm do
 | `server/lib/gemini.ts` | Cached `@google/genai` client. Returns `null` if `GEMINI_API_KEY` isn't set, so the route can 503 cleanly. |
 | `server/lib/assistTypes.ts` / `src/lib/assistTypes.ts` | Mirror of the wire types (`AssistPhase`, `Shape`, `ShapePhaseEntry`, `Position`, `AssistState`). Duplicated because client + server have separate tsconfigs. |
 | `server/lib/phasePlaybooks.ts` | Per-`PhaseCategory` "playbook" — what completion looks like, which `ticket_updates` to prioritize, the shape the refined `action` should take, and an `interview?: boolean` opt-in that splices the shared `INTERVIEW_HINTS` (one-at-a-time + MC-preferred + no-re-ask) into the prompt. Spliced into the prompt during `refine`. |
-| `server/routes/assist-pre-mortem.ts` | One-shot Gemini call returning 3-5 risks phrased as questions for the planning surface's "Run pre-mortem" button. Stateless — never mutates `AssistState`; each accepted risk hits `addOpenQuestion` separately. |
+| `server/routes/assist-pre-mortem.ts` | One-shot Gemini call returning 3-5 "things people often miss" phrased as warm, curious questions for the planning surface's "Surface blind spots" button. Stateless — never mutates `AssistState`; each accepted item hits `addOpenQuestion` separately. The route name is legacy ("pre-mortem"); the prompt and UI both use blind-spots/oversight framing, not failure-mode language. |
 | `src/lib/contextConstraints.ts` / `server/lib/contextConstraints.ts` | Mirrored helpers (`extractConstraints`/`applyConstraints`) for the constraint pills. Pills persist into `ticket.context` inside a stable `<!-- orbit:constraints -->` marker block so the model can re-extract them. |
 | `src/lib/lockInPlan.ts` / `server/lib/lockInPlan.ts` | Mirrored pure helpers — `checkLockInPreconditions` gates the button; `computeLockInUpdates` decides which phase actions to add to the ticket DoD and which phase becomes `in_progress` after the lock-in. No model call. |
 | `src/components/tickets/ConstraintPills.tsx` | Pill row used by `PlanningSurface` (Budget / Deadline / People / Effort). Persists into `ticket.context`. |
@@ -325,14 +325,16 @@ answer → commit. A single bordered surface inside the panel:
    own the parse/replace. The block is always pinned to the END of
    `context` so the model's append-style narrative isn't disturbed.
 
-3. **Pre-mortem** — gated behind a button (never auto-runs). Clicking
-   it hits `/api/assist/pre-mortem`, a stateless one-shot Gemini call
-   that returns 3-5 risks phrased as questions. The
-   `PreMortemConfirmList` renders one row per risk with **Capture** /
+3. **Blind spots** — gated behind a "Surface blind spots" button
+   (never auto-runs). Clicking it hits `/api/assist/pre-mortem`, a
+   stateless one-shot Gemini call that returns 3-5 "things people
+   often miss" phrased as warm, curious questions (NOT failure-framed
+   risks — see the framing note in the route). The
+   `PreMortemConfirmList` renders one row per item with **Capture** /
    **Skip**. Capture goes through `addOpenQuestion`; skipping is
-   local-only (the next pre-mortem run gets a fresh list). Server-side
-   dedupe against the ticket's existing open questions means you can
-   run it multiple times without piling up duplicates.
+   local-only (the next run produces a fresh list). Server-side dedupe
+   against the ticket's existing open questions means you can run it
+   multiple times without piling up duplicates.
 
 4. **Interview** — delegates to `PlanningAgent`, which renders the
    model's `next_question` (one at a time) using

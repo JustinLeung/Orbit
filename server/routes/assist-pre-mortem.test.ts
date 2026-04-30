@@ -54,18 +54,18 @@ describe('POST /api/assist/pre-mortem', () => {
     expect(res.status).toBe(503)
   })
 
-  it('returns risks when the model produces a clean payload', async () => {
+  it('returns blind-spot items when the model produces a clean payload', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         risks: [
           {
-            question: 'What if the venue cancels last minute?',
+            question: "Have you thought about who's actually attending vs invited?",
             rationale: null,
           },
           {
-            question: 'Are we sure the budget covers tax and tip?',
-            rationale: 'Catered dinners often get expensive late.',
+            question: 'Is the budget per-person or total?',
+            rationale: 'Easy to forget when scoping early.',
           },
         ],
       }),
@@ -76,16 +76,16 @@ describe('POST /api/assist/pre-mortem', () => {
       .send({ ticket: TICKET })
     expect(res.status).toBe(200)
     expect(res.body.risks).toHaveLength(2)
-    expect(res.body.risks[0].question).toMatch(/cancels/)
+    expect(res.body.risks[0].question).toMatch(/attending/)
   })
 
-  it('drops risks whose prompt duplicates an existing open question', async () => {
+  it('drops items whose prompt duplicates an existing open question', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         risks: [
-          { question: 'What if the venue cancels last minute?' },
-          { question: 'How will we handle weather?' },
+          { question: 'Is the budget per-person or total?' },
+          { question: 'Where will dietary restrictions come from?' },
         ],
       }),
     })
@@ -96,13 +96,13 @@ describe('POST /api/assist/pre-mortem', () => {
         ticket: {
           ...TICKET,
           open_questions: [
-            { question: 'what if the venue cancels last minute', resolved: false, resolution: null },
+            { question: 'is the budget per-person or total', resolved: false, resolution: null },
           ],
         },
       })
     expect(res.status).toBe(200)
     expect(res.body.risks).toHaveLength(1)
-    expect(res.body.risks[0].question).toMatch(/weather/)
+    expect(res.body.risks[0].question).toMatch(/dietary/)
   })
 
   it('caps the list at 5 even if the model returns more', async () => {

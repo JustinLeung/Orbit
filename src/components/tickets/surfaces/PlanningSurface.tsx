@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import {
-  AlertTriangle,
   CheckCircle2,
   CheckSquare,
+  HelpCircle,
   Loader2,
   Sparkles,
 } from 'lucide-react'
@@ -114,7 +114,7 @@ export function PlanningSurface(props: SurfaceProps) {
             Planning · {phase.title}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Scope it, sanity-check it, then lock it in.
+            Scope it, surface what you might be missing, then lock it in.
           </p>
         </div>
       </div>
@@ -132,8 +132,8 @@ export function PlanningSurface(props: SurfaceProps) {
         {premortemRisks === null ? (
           <div className="flex items-center justify-between gap-2 rounded-md border bg-background/40 px-2.5 py-1.5 text-xs">
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              <AlertTriangle className="h-3 w-3 text-amber-500" aria-hidden />
-              What could go wrong?
+              <HelpCircle className="h-3 w-3 text-primary" aria-hidden />
+              Anything you might be missing?
             </span>
             <Button
               type="button"
@@ -144,10 +144,10 @@ export function PlanningSurface(props: SurfaceProps) {
             >
               {premortemBusy ? (
                 <>
-                  <Loader2 className="h-3 w-3 animate-spin" /> Surfacing…
+                  <Loader2 className="h-3 w-3 animate-spin" /> Looking…
                 </>
               ) : (
-                'Run pre-mortem'
+                'Surface blind spots'
               )}
             </Button>
           </div>
