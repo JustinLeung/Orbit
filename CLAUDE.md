@@ -66,6 +66,13 @@ These bite us repeatedly — check before committing.
   `server/lib/assistTypes.ts`. Client + server have separate tsconfigs;
   cross-tree imports are messy, so the types are mirrored. Change one,
   change the other in the same commit. (See [docs/assist.md](./docs/assist.md).)
+- **`contextConstraints.ts` and `lockInPlan.ts` are mirrored the same way**
+  — `src/lib/contextConstraints.ts` ↔ `server/lib/contextConstraints.ts`,
+  `src/lib/lockInPlan.ts` ↔ `server/lib/lockInPlan.ts`. Keep them in sync
+  in the same commit. The mirroring lets the server-side live evals
+  import the pure helpers without crossing the src/server tsconfig
+  boundary. (See
+  [docs/assist.md § Planning surface affordances](./docs/assist.md#planning-surface-affordances).)
 - **Every mutator must fire its `notify*Changed` event.** Lists and
   detail sections refresh via window CustomEvents, not Supabase realtime.
   If you add a new `update`/`insert`/`delete` path in `src/lib/queries.ts`

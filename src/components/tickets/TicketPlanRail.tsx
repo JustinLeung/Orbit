@@ -1,7 +1,16 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { CalendarClock, CheckCircle2, GripVertical, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  CheckSquare,
+  GripVertical,
+  Loader2,
+  X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { EditableField } from '@/components/tickets/EditableField'
 import { PhaseCategoryPill } from '@/components/tickets/PhaseCategoryPill'
 import {
@@ -23,12 +32,20 @@ import {
   acceptSuggestedStep,
   addPhaseToShape,
   buildPickedPhaseState,
+  lockInPlan,
   persistAssistState,
   removePhase,
+  runPreMortem,
   useLatestAssistState,
   type FieldChangeValue,
 } from '@/lib/queries'
+import { checkLockInPreconditions } from '@/lib/lockInPlan'
 import { AddStepInline } from '@/components/tickets/AddStepInline'
+import { ConstraintPills } from '@/components/tickets/ConstraintPills'
+import {
+  PreMortemConfirmList,
+  type PreMortemRisk,
+} from '@/components/tickets/PreMortemConfirmList'
 import { SuggestedSteps } from '@/components/tickets/SuggestedSteps'
 import type {
   AssistState,
@@ -58,17 +75,79 @@ export type SaveField = <K extends keyof Ticket>(
 export function TicketPlanRail({
   ticket,
   saveField,
+  onTicketChange,
 }: {
   ticket: Ticket
   saveField: SaveField
+  // Called when this rail mutates the ticket directly (constraint pills,
+  // lock-in DoD merge). Lets the parent dialog keep its `editing` state
+  // in sync with the new server value without waiting for a refetch.
+  onTicketChange?: (next: Ticket) => void
 }) {
   const { data: assistState } = useLatestAssistState(ticket.id)
   const phases: ShapePhaseEntry[] = assistState?.shape?.phases ?? []
   const currentPhaseId = assistState?.position?.current_phase_id ?? null
   const currentIdx = phases.findIndex((p) => p.id === currentPhaseId)
+  const currentPhase = currentIdx >= 0 ? phases[currentIdx] : null
   const doneCount = phases.filter((p) => p.status === 'done').length
   const progressPct =
     phases.length > 0 ? Math.round((doneCount / phases.length) * 100) : 0
+
+  // The "planning surface" shows the pills + Lock-in button. We're on
+  // it when the current phase is a planning phase, OR no phase is picked
+  // yet and the first phase is planning (the bootstrap state for a
+  // freshly-shaped multi-step ticket).
+  const isPlanningSurface =
+    currentPhase?.category === 'planning' ||
+    (!currentPhase && phases.length > 0 && phases[0].category === 'planning')
+
+  const lockInCheck = checkLockInPreconditions(
+    {
+      goal: ticket.goal,
+      definition_of_done:
+        (ticket.definition_of_done as Array<{ item: string; done: boolean }> | null) ?? null,
+    },
+    assistState ?? null,
+  )
+  const [lockInBusy, setLockInBusy] = useState(false)
+  const [lockInError, setLockInError] = useState<string | null>(null)
+
+  // Pre-mortem state lives in the rail (alongside the lock-in button)
+  // because the affordance applies to the whole plan, not the active
+  // refine surface. Risks aren't persisted between dialog opens — the
+  // user accepts each one as a ticket-level open question.
+  const [premortemBusy, setPremortemBusy] = useState(false)
+  const [premortemError, setPremortemError] = useState<string | null>(null)
+  const [premortemRisks, setPremortemRisks] = useState<PreMortemRisk[] | null>(
+    null,
+  )
+
+  async function handleLockIn() {
+    if (!assistState) return
+    setLockInBusy(true)
+    setLockInError(null)
+    try {
+      const result = await lockInPlan(ticket, assistState)
+      onTicketChange?.(result.ticket)
+    } catch (err) {
+      setLockInError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLockInBusy(false)
+    }
+  }
+
+  async function handleRunPreMortem() {
+    setPremortemBusy(true)
+    setPremortemError(null)
+    try {
+      const risks = await runPreMortem(ticket, assistState ?? null)
+      setPremortemRisks(risks)
+    } catch (err) {
+      setPremortemError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPremortemBusy(false)
+    }
+  }
 
   // ── Drag-reorder ────────────────────────────────────────────────────
   // While a drag is in progress we keep the working order in a ref AND in
@@ -247,6 +326,95 @@ export function TicketPlanRail({
         </div>
       </div>
 
+      {/* Planning surface — constraint pills + Lock-in. Only renders
+          when the user is on (or about to start) a planning phase. */}
+      {isPlanningSurface && phases.length > 0 ? (
+        <div className="space-y-2 border-b px-3 py-3">
+          <div className="flex items-baseline justify-between">
+            <SectionLabel>Planning</SectionLabel>
+            <span className="text-[10px] text-muted-foreground">
+              constraints + lock in
+            </span>
+          </div>
+          <ConstraintPills ticket={ticket} onTicketChange={onTicketChange} />
+
+          {/* Pre-mortem — gated behind a button (never auto-runs).
+              Once risks come back the confirm list takes the slot
+              until the user closes it. */}
+          {premortemRisks === null ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={premortemBusy || lockInBusy}
+              onClick={() => void handleRunPreMortem()}
+              className="w-full"
+              title="Ask the assistant for risks worth catching before they bite"
+            >
+              {premortemBusy ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" /> Surfacing risks…
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="h-3 w-3 text-amber-500" />
+                  Run pre-mortem
+                </>
+              )}
+            </Button>
+          ) : (
+            <PreMortemConfirmList
+              ticketId={ticket.id}
+              risks={premortemRisks}
+              onClose={() => setPremortemRisks(null)}
+            />
+          )}
+          {premortemError ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-[10px] text-destructive">
+              {premortemError}
+            </p>
+          ) : null}
+
+          <div>
+            <Button
+              type="button"
+              size="xs"
+              variant="default"
+              disabled={!lockInCheck.ok || lockInBusy}
+              onClick={() => void handleLockIn()}
+              title={
+                lockInCheck.ok
+                  ? 'Promote each phase action into the ticket DoD and advance to the next phase'
+                  : lockInDisabledHint(lockInCheck.reason)
+              }
+              className="w-full"
+            >
+              {lockInBusy ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                  Locking in…
+                </>
+              ) : (
+                <>
+                  <CheckSquare className="h-3 w-3" aria-hidden />
+                  Lock in the plan
+                </>
+              )}
+            </Button>
+            {!lockInCheck.ok ? (
+              <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
+                {lockInDisabledHint(lockInCheck.reason)}
+              </p>
+            ) : null}
+            {lockInError ? (
+              <p className="mt-1 text-[10px] leading-tight text-destructive">
+                {lockInError}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {/* Vertical step list. */}
       <div className="px-2 py-2">
         {phases.length === 0 ? (
@@ -363,6 +531,19 @@ export function TicketPlanRail({
 }
 
 // ── SectionLabel ───────────────────────────────────────────────────────
+
+function lockInDisabledHint(
+  reason: 'no_goal' | 'no_phases' | 'no_dod_item',
+): string {
+  switch (reason) {
+    case 'no_goal':
+      return 'Set a goal first.'
+    case 'no_phases':
+      return 'Add at least one phase first.'
+    case 'no_dod_item':
+      return 'Add at least one DoD item to the ticket first.'
+  }
+}
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (

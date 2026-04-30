@@ -17,6 +17,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import express from 'express'
 import request from 'supertest'
 import type { AssistState, PhaseCategory } from '../lib/assistTypes.js'
+import { computeLockInUpdates } from '../lib/lockInPlan.js'
 
 const LIVE = process.env.RUN_LIVE_EVALS === '1' && !!process.env.GEMINI_API_KEY
 const d = LIVE ? describe : describe.skip
@@ -240,6 +241,34 @@ d('assist-walkthrough live behavioral evals', () => {
     expect(res.status).toBe(200)
     const phases = res.body.state?.shape?.phases ?? []
     expect(phases.length).toBeGreaterThanOrEqual(3)
+  }, 30_000)
+
+  // The lock-in-the-plan flow is deterministic on the client (no
+  // model call), but it depends on the model producing action-bearing
+  // phases during shape. This eval threads both pieces: shape a
+  // multi-step ticket → call computeLockInUpdates against the resulting
+  // state → assert that the merged DoD has at least 2 added items
+  // (mirroring the ticket's "≥2 DoD items" acceptance criterion).
+  it('lock-in: vague-scope multi-step ticket → ≥2 DoD items after compile', async () => {
+    const app = await makeApp()
+    const res = await request(app)
+      .post('/api/assist/walkthrough')
+      .send({
+        ticket: {
+          title: "Plan my brother's 30th birthday party",
+          description: 'I want to put something together but I do not know where to start.',
+        },
+        state: null,
+      })
+    expect(res.status).toBe(200)
+    const state = res.body.state as AssistState
+    expect(state.shape).toBeTruthy()
+    const result = computeLockInUpdates(
+      { goal: state.shape!.goal ?? 'Plan it', definition_of_done: [] },
+      state,
+    )
+    expect(result).not.toBeNull()
+    expect(result!.added_dod_items.length).toBeGreaterThanOrEqual(2)
   }, 30_000)
 
   // When planning has missing info, the playbook tells the model to

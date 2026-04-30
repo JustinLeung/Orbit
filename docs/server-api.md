@@ -18,6 +18,7 @@ app.get('/healthz', (_req, res) => res.send('ok'))      // Render health check
 app.use('/api/send-email',         sendEmailRoute)
 app.use('/api/auth/send-otp',      sendOtpRoute)
 app.use('/api/assist/walkthrough', requireUser(), assistWalkthroughRoute)
+app.use('/api/assist/pre-mortem',  requireUser(), assistPreMortemRoute)
 
 app.use(express.static(distPath))
 app.get('*', (_req, res) => res.sendFile(`${distPath}/index.html`))
@@ -98,6 +99,32 @@ Special case: if `advance: true` would push the phase to `'done'`, the route sho
 
 `ticket_updates` is **sanitized** before returning (drops empty strings, drops invalid `next_action_at`, drops empty arrays). The client still re-checks every value against the current ticket before applying, so it's defense in depth.
 
+### `POST /api/assist/pre-mortem`
+
+A one-shot Gemini call that asks "what could go wrong?" and returns 3-5 risks phrased as questions. Distinct from `/walkthrough` because it does NOT mutate `AssistState` — capturing a risk is a separate `addOpenQuestion` call decided by the user, one row at a time. Gated by `requireUser()`.
+
+Request:
+```ts
+{
+  ticket: TicketSnapshot,
+  plan?: { goal: string | null; phases: Array<{ title: string; category: string; action: string | null }> }
+}
+```
+
+Response:
+```ts
+{ risks: Array<{ question: string; rationale: string | null }> }
+```
+
+Status codes:
+- `400` — `ticket.title` missing.
+- `401` — bad/missing bearer.
+- `503` — `GEMINI_API_KEY` not configured.
+- `502` — Gemini returned empty text or malformed JSON.
+- `500` — generic Gemini failure.
+
+Risks are deduped against the ticket's existing `open_questions` (case-insensitive normalized prompt) and capped at 5. The client triggers this endpoint **only** when the user clicks "Run pre-mortem" on the planning surface — never auto-runs.
+
 ## Server libs
 
 ### `server/lib/supabaseAdmin.ts`
@@ -128,6 +155,7 @@ Server-side tests use `supertest` against the Express app. Coverage today:
 - `send-otp.test.ts` — happy + dev fallback paths.
 - `requireUser.test.ts` — 401 on missing/bad bearer, success attaches `req.userId`.
 - `assist-walkthrough.test.ts` — happy turn + 503 when `GEMINI_API_KEY` is unset.
+- `assist-pre-mortem.test.ts` — happy turn, 5-risk cap, dedupe against existing open questions, 503 when key unset.
 
 Tests use `__resetResendForTests()` / `__resetGeminiForTests()` between cases since the singletons cache an env-keyed client. If you cache another env-keyed singleton, add a similar reset helper.
 

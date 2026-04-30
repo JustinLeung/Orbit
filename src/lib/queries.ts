@@ -19,6 +19,10 @@ import type {
 } from '@/types/orbit'
 import type { Json } from '@/types/database'
 import type { AssistState, ShapePhaseEntry } from '@/lib/assistTypes'
+import {
+  computeLockInUpdates,
+  type LockInTicketView,
+} from '@/lib/lockInPlan'
 
 type State<T> = {
   data: T
@@ -868,6 +872,110 @@ export async function acceptSuggestedStep(
   if (!next) return null
   await persistAssistState(ticket, next, 'accept_suggested_step')
   return next
+}
+
+// "Lock in the plan" — deterministic transition off the planning surface.
+// Promotes each phase's `action` into the ticket-level definition_of_done
+// (skipping items already present, case-insensitive), flips the current
+// planning phase to done, and advances `current_phase_id` to the next
+// non-done phase. No model call: the user has already done the thinking
+// during the planning interview, this is just compiling.
+//
+// Returns the merged DoD count + the names of items that were ADDED so
+// the caller can show a small "added N items" toast.
+export async function lockInPlan(
+  ticket: Ticket,
+  state: AssistState,
+): Promise<{
+  state: AssistState
+  ticket: Ticket
+  added_dod_items: string[]
+}> {
+  const view: LockInTicketView = {
+    goal: ticket.goal,
+    definition_of_done:
+      (ticket.definition_of_done as DefinitionOfDoneItem[]) ?? null,
+  }
+  const result = computeLockInUpdates(view, state)
+  if (!result) throw new Error('Cannot lock in: shape is empty.')
+
+  // Apply DoD update first so the audit row references the OLD DoD. If
+  // the merge produced no new items we skip the ticket write, but we
+  // still persist the phase advance — the user explicitly clicked.
+  let nextTicket = ticket
+  if (result.added_dod_items.length > 0) {
+    nextTicket = await updateTicket(
+      ticket.id,
+      { definition_of_done: result.next_dod },
+      {
+        changedFields: [
+          {
+            field: 'definition_of_done',
+            old: (ticket.definition_of_done ?? []) as FieldChangeValue,
+            new: result.next_dod as FieldChangeValue,
+          },
+        ],
+      },
+    )
+  }
+
+  const nextState: AssistState = {
+    ...state,
+    shape: result.next_shape,
+    position: result.next_position,
+    next_question: null,
+  }
+  await persistAssistState(nextTicket, nextState, 'lock_in_plan')
+  return {
+    state: nextState,
+    ticket: nextTicket,
+    added_dod_items: result.added_dod_items,
+  }
+}
+
+// Calls /api/assist/pre-mortem and returns 3-5 risks phrased as
+// questions. The route never mutates AssistState — capturing a risk
+// happens later, when the user clicks "Capture as open question" on a
+// specific row, via addOpenQuestion.
+export async function runPreMortem(
+  ticket: Ticket,
+  state: AssistState | null,
+): Promise<Array<{ question: string; rationale: string | null }>> {
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+  if (sessionErr) throw sessionErr
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new Error('Not signed in')
+
+  const snapshot = await ticketSnapshot(ticket)
+  const plan = state?.shape
+    ? {
+        goal: state.shape.goal,
+        phases: state.shape.phases.map((p) => ({
+          title: p.title,
+          category: p.category as string,
+          action: p.action,
+        })),
+      }
+    : null
+  const res = await fetch('/api/assist/pre-mortem', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ ticket: snapshot, plan }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body?.error ?? `Request failed (${res.status})`)
+  }
+  const risks = Array.isArray(body.risks) ? body.risks : []
+  return risks
+    .map((r: { question?: unknown; rationale?: unknown }) => ({
+      question: typeof r.question === 'string' ? r.question : '',
+      rationale: typeof r.rationale === 'string' ? r.rationale : null,
+    }))
+    .filter((r: { question: string }) => r.question.trim() !== '')
 }
 
 // Persists an assist state without going through the model — used when the
