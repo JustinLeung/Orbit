@@ -1,59 +1,39 @@
 import { useEffect, useState } from 'react'
-import {
-  ArrowRight,
-  CheckCircle2,
-  Circle,
-  CircleDashed,
-  Loader2,
-  RefreshCcw,
-  Sparkles,
-  XCircle,
-} from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/tickets/form-helpers'
-import { PhaseCategoryPill } from '@/components/tickets/PhaseCategoryPill'
-import { resolveAgent } from '@/components/tickets/agents'
-import { cn } from '@/lib/utils'
+import { resolveSurface } from '@/components/tickets/surfaces'
 import {
   markAssistBootstrapped,
   runAssistTurn,
-  togglePhaseDodItem,
   updateTicket,
   useLatestAssistState,
 } from '@/lib/queries'
-import type {
-  AssistState,
-  ShapePhaseEntry,
-  ShapePhaseStatus,
-} from '@/lib/assistTypes'
+import type { AssistState } from '@/lib/assistTypes'
 import type { Ticket } from '@/types/orbit'
 
-// Inline assist surface that lives inside TicketDetailDialog. Drives the
-// shape → refine walkthrough as a structured form rather than a chat:
-//   1. Generate the shape automatically (one turn) when the ticket has none.
-//      Each phase carries a concrete `action` — phases ARE the action plan.
-//   2. Force the user to click their current phase from that shape.
-//   3. Render category-specific structured questions for that phase.
-//   4. Submit refines the current phase's action in place. Each phase row
-//      offers "Set as next action" so the user can promote the action to
-//      the ticket's primary next_action.
-// Free-form chat is demoted to an "Ask a follow-up" affordance below.
+// Thin shell around the per-phase "surface" dispatcher. The panel itself
+// owns:
+//   - shape bootstrap (kicks off the first turn so the user sees a shape
+//     without clicking)
+//   - error display
+//   - "Ask a follow-up" affordance (the demoted free-form chat slot)
+//   - optimistic ticket mirror (so other dialog rows reflect mutations
+//     the surface makes via runAssistTurn / setNextAction without a
+//     round-trip flash)
+//
+// Every other behavior — DoD checklists, refine forms, planning pills,
+// pre-mortem, lock-in — lives in the surface for that phase. See
+// src/components/tickets/surfaces/.
 export function TicketAssistPanel({
   ticket,
   onTicketChange,
-  hideActions,
 }: {
   ticket: Ticket
   // Lets the parent dialog keep its own `editing` state in sync with
-  // ticket mutations we make here (Set as next action, runAssistTurn's
-  // ticket_updates). Without this, the dialog's other field rows show
-  // stale values until the next refetch — visible as a flash.
+  // ticket mutations the surfaces make (Set as next action,
+  // runAssistTurn's ticket_updates, constraint pill saves).
   onTicketChange?: (next: Ticket) => void
-  // When true, suppress the inline plan (ActionsSection + ShapePicker).
-  // Used when the parent renders the plan elsewhere (e.g. the dialog's
-  // left rail), so the assist panel stays focused on refining the
-  // current step without duplicating the plan.
-  hideActions?: boolean
 }) {
   const { data: persisted, loading: loadingState } = useLatestAssistState(
     ticket.id,
@@ -76,6 +56,14 @@ export function TicketAssistPanel({
     setTrackedTicketId(ticket.id)
     setLiveTicket(ticket)
   }
+  // Keep the panel's mirror in sync when the parent updates the ticket
+  // (e.g. constraint pills mutate context → dialog updates editing →
+  // panel needs the new context). Same render-time pattern.
+  const [trackedTicketRef, setTrackedTicketRef] = useState(ticket)
+  if (ticket !== trackedTicketRef && ticket.id === trackedTicketRef.id) {
+    setTrackedTicketRef(ticket)
+    setLiveTicket(ticket)
+  }
 
   // Kick off the first turn so the user sees a shape without having to
   // click anything. Sticky module-level guard so we never fire twice for
@@ -89,6 +77,17 @@ export function TicketAssistPanel({
     void doTurn({ state: null, userMessage: null, advance: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingState, persisted, ticket.id])
+
+  // External changes to persisted (e.g. the rail phase picker) need
+  // to flush any stale optimistic override the panel was holding from a
+  // prior in-panel turn — otherwise `state = override ?? persisted` would
+  // mask the new value. Same render-time pattern used elsewhere.
+  const [trackedPersisted, setTrackedPersisted] =
+    useState<AssistState | null>(persisted)
+  if (persisted !== trackedPersisted) {
+    setTrackedPersisted(persisted)
+    if (override !== null) setOverride(null)
+  }
 
   async function doTurn(args: {
     state: AssistState | null
@@ -117,23 +116,11 @@ export function TicketAssistPanel({
     }
   }
 
-  // External changes to persisted (e.g. the sidebar phase dropdown) need
-  // to flush any stale optimistic override the panel was holding from a
-  // prior in-panel turn — otherwise `state = override ?? persisted` would
-  // mask the new value. Same render-time pattern used for trackedTicketId
-  // above so we don't fire setState inside an effect.
-  const [trackedPersisted, setTrackedPersisted] =
-    useState<AssistState | null>(persisted)
-  if (persisted !== trackedPersisted) {
-    setTrackedPersisted(persisted)
-    if (override !== null) setOverride(null)
-  }
-
-  // Wrapped doTurn for per-phase agents. Agents emit (userMessage, advance)
-  // tuples; the panel owns state and busy/error/lastApplied. We close
-  // the refine surface on a successful turn so the post-refine action
-  // becomes the primary thing the user sees again.
-  async function agentRunTurn(args: {
+  // Wrapped doTurn for surfaces' embedded agents. Closes the refine
+  // surface on a successful turn so the post-refine action becomes the
+  // primary thing the user sees again — same behavior as the prior
+  // panel implementation.
+  async function surfaceRunTurn(args: {
     userMessage: string | null
     advance: boolean
   }) {
@@ -149,8 +136,8 @@ export function TicketAssistPanel({
 
   async function setNextAction(title: string) {
     // Optimistic update first — the button state and the dialog's other
-    // fields (Next action row up top, etc.) all flip immediately, so
-    // there's no visible flash between click and the server returning.
+    // fields all flip immediately, so there's no visible flash between
+    // click and the server returning.
     const prev = liveTicket
     const optimistic = { ...liveTicket, next_action: title }
     setLiveTicket(optimistic)
@@ -172,7 +159,6 @@ export function TicketAssistPanel({
       setLiveTicket(updated)
       onTicketChange?.(updated)
     } catch (err) {
-      // Rollback so we don't lie about state on failure.
       setLiveTicket(prev)
       onTicketChange?.(prev)
       setError(err instanceof Error ? err.message : String(err))
@@ -191,40 +177,10 @@ export function TicketAssistPanel({
   const currentPhase =
     shape?.phases.find((p) => p.id === currentPhaseId) ?? null
   const isDone = state?.phase === 'done'
-  // Resolve the per-phase agent. Defaults to the static-form agent when
-  // the category doesn't have a bespoke entry yet — preserves the
-  // pre-dispatcher behavior for research/doing/waiting/deciding/closing.
-  const Agent = currentPhase ? resolveAgent(currentPhase.category) : null
-  // While we're still in the initial shape phase and a current phase has
-  // been picked, surface the questions form by default — that's how we
-  // help the assistant help. Once we've refined at least once
-  // (state.phase === 'refine'), tuck it back behind a "Refine" button so
-  // the action is the primary thing the user sees.
-  const showQuestions =
-    !!shape &&
-    !!currentPhase &&
-    !isDone &&
-    (refiningOpen || state?.phase === 'shape')
+  const Surface = currentPhase ? resolveSurface(currentPhase.category) : null
 
   return (
     <div className="space-y-4">
-      {/* Actions section lives OUTSIDE the assist panel once a phase has
-          been picked — it's the user's plan, not an assistant interaction.
-          Hidden when the parent renders the plan itself (rail mode). */}
-      {!hideActions && shape && currentPhase && state ? (
-        <ActionsSection
-          shape={shape}
-          currentPhaseId={currentPhaseId}
-          ticket={liveTicket}
-          state={state}
-          onSetNextAction={setNextAction}
-          onRefine={
-            busy || isDone ? undefined : () => setRefiningOpen(true)
-          }
-          refineActive={showQuestions}
-        />
-      ) : null}
-
       <div className="rounded-lg border bg-muted/20">
         <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
           <div className="flex items-center gap-1.5">
@@ -249,63 +205,19 @@ export function TicketAssistPanel({
             </div>
           ) : null}
 
-          {/* Stage 2: shape exists but no phase picked — the read-only
-              preview of phases. The picker dropdown lives in the sidebar.
-              Hidden in rail mode since the rail itself shows the phases. */}
-          {!hideActions && shape && !currentPhase && state ? (
-            <ShapePicker
-              shape={shape}
-              requirePick={!currentPhaseId && !isDone}
-              ticket={liveTicket}
-              state={state}
-              onSetNextAction={setNextAction}
-            />
-          ) : null}
-
-          {hideActions && shape && !currentPhase && !isDone ? (
+          {/* Stage 2: shape exists but no phase picked — nudge the user
+              toward the rail's phase picker. The plan itself is rendered
+              by TicketPlanRail, so the panel just points at it. */}
+          {shape && !currentPhase && !isDone ? (
             <p className="text-xs font-medium text-primary">
               Pick the phase you're in from the plan rail →
             </p>
           ) : null}
 
-          {/* Per-phase DoD checklist for the current phase. Only rendered
-              in rail mode — when ActionsSection is hidden, the per-phase
-              DoD wouldn't otherwise have a home in the panel. Inline
-              mode shows DoD inside each PhaseRow already. Toggle goes
-              through persistAssistState — no model call. */}
-          {hideActions && currentPhase && currentPhase.definition_of_done.length > 0 && state ? (
-            <PhaseDodChecklist
-              ticket={liveTicket}
-              state={state}
-              phase={currentPhase}
-            />
-          ) : null}
-
-        {/* Stage 3: structured questions, collapsed behind "Refine this phase" */}
-          {/* Once a phase is picked, the assist panel switches role — it
-              becomes help for the current action. The phase title acts as
-              the subject line so it's clear what this is helping with. */}
-          {currentPhase && !isDone ? (
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">
-                  Help with: {currentPhase.title}
-                </p>
-                {currentPhase.action ? (
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {currentPhase.action}
-                  </p>
-                ) : null}
-              </div>
-              <PhaseCategoryPill category={currentPhase.category} />
-            </div>
-          ) : null}
-
-          {showQuestions && currentPhase && state && Agent ? (
+          {/* Stage 3: phase-specific surface owns the body. */}
+          {Surface && currentPhase && state && !isDone ? (
             // eslint-disable-next-line react-hooks/static-components
-            <Agent
-              // Remount on phase change so any local state in the agent
-              // (answer drafts, kickoff guards) resets cleanly.
+            <Surface
               key={currentPhase.id}
               ticket={liveTicket}
               state={state}
@@ -313,48 +225,17 @@ export function TicketAssistPanel({
               busy={busy}
               loadingState={loadingState}
               refiningOpen={refiningOpen}
-              onCancel={() => setRefiningOpen(false)}
-              runTurn={agentRunTurn}
+              isShapePhase={state.phase === 'shape'}
+              lastAppliedFields={lastApplied}
+              onSetNextAction={setNextAction}
+              onOpenRefine={() => setRefiningOpen(true)}
+              onCancelRefine={() => setRefiningOpen(false)}
+              onTicketChange={(next) => {
+                setLiveTicket(next)
+                onTicketChange?.(next)
+              }}
+              runTurn={surfaceRunTurn}
             />
-          ) : null}
-
-          {/* When a phase is picked but the structured form is hidden,
-              surface a primary "Refine this action" affordance so the
-              assistant has something obvious to do. */}
-          {currentPhase && !isDone && !showQuestions ? (
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                Answer a few questions to refine this action.
-              </p>
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={() => setRefiningOpen(true)}
-                disabled={busy}
-              >
-                <RefreshCcw className="h-3 w-3" aria-hidden />
-                Refine action
-              </Button>
-            </div>
-          ) : null}
-
-          {lastApplied.length > 0 && !busy ? (
-            <div className="flex items-start gap-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <CheckCircle2 className="mt-0.5 h-3 w-3 text-primary" aria-hidden />
-              <span>
-                Updated{' '}
-                <span className="text-foreground">{lastApplied.join(', ')}</span>{' '}
-                on the ticket.
-              </span>
-            </div>
-          ) : null}
-
-          {busy && shape ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              Thinking…
-            </div>
           ) : null}
 
           {error ? (
@@ -428,318 +309,3 @@ export function TicketAssistPanel({
     </div>
   )
 }
-
-// Lives OUTSIDE the assist panel once a phase is picked. Groups phases
-// into previous / current / remaining buckets so the user sees a clear
-// "where I've been, where I am, where I'm going" arc. `blocked` phases
-// haven't been completed and aren't the active focus, so they sit with
-// "remaining".
-function ActionsSection({
-  shape,
-  currentPhaseId,
-  ticket,
-  state,
-  onSetNextAction,
-  onRefine,
-  refineActive,
-}: {
-  shape: NonNullable<AssistState['shape']>
-  currentPhaseId: string | null
-  ticket: Ticket
-  state: AssistState
-  onSetNextAction: (title: string) => void
-  onRefine?: () => void
-  refineActive: boolean
-}) {
-  const previous = shape.phases.filter((p) => p.status === 'done')
-  const current = shape.phases.filter((p) => p.status === 'in_progress')
-  const remaining = shape.phases.filter(
-    (p) => p.status === 'not_started' || p.status === 'blocked',
-  )
-  const renderRow = (p: ShapePhaseEntry) => {
-    const isCurrent = currentPhaseId === p.id
-    return (
-      <PhaseRow
-        key={p.id}
-        phase={p}
-        isCurrent={isCurrent}
-        ticket={ticket}
-        state={state}
-        onSetNextAction={onSetNextAction}
-        onRefine={isCurrent && !refineActive ? onRefine : undefined}
-      />
-    )
-  }
-  return (
-    <div>
-      <div className="mb-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Actions
-        </span>
-      </div>
-      <div className="space-y-3">
-        {previous.length > 0 ? (
-          <ActionGroup label="Previous">
-            {previous.map(renderRow)}
-          </ActionGroup>
-        ) : null}
-        {current.length > 0 ? (
-          <ActionGroup label="Current">{current.map(renderRow)}</ActionGroup>
-        ) : null}
-        {remaining.length > 0 ? (
-          <ActionGroup label="Remaining">
-            {remaining.map(renderRow)}
-          </ActionGroup>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-// Lives INSIDE the assist panel before a phase is picked. Read-only
-// preview of the proposed phases; the actual picker dropdown sits in
-// the sidebar's Assist section so it's discoverable from anywhere on
-// the ticket.
-function ShapePicker({
-  shape,
-  requirePick,
-  ticket,
-  state,
-  onSetNextAction,
-}: {
-  shape: NonNullable<AssistState['shape']>
-  requirePick: boolean
-  ticket: Ticket
-  state: AssistState
-  onSetNextAction: (title: string) => void
-}) {
-  return (
-    <div className="space-y-2">
-      {requirePick ? (
-        <p className="text-xs font-medium text-primary">
-          Pick the phase you're in from the sidebar →
-        </p>
-      ) : null}
-      <ol className="space-y-1.5">
-        {shape.phases.map((p) => (
-          <PhaseRow
-            key={p.id}
-            phase={p}
-            isCurrent={false}
-            ticket={ticket}
-            state={state}
-            onSetNextAction={onSetNextAction}
-          />
-        ))}
-      </ol>
-    </div>
-  )
-}
-
-function ActionGroup({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <p className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-        {label}
-      </p>
-      <ol className="space-y-1.5">{children}</ol>
-    </div>
-  )
-}
-
-function PhaseRow({
-  phase,
-  isCurrent,
-  ticket,
-  state,
-  onSetNextAction,
-  onRefine,
-}: {
-  phase: ShapePhaseEntry
-  isCurrent: boolean
-  ticket: Ticket
-  state: AssistState
-  onSetNextAction: (title: string) => void
-  onRefine?: () => void
-}) {
-  const [applying, setApplying] = useState(false)
-  const isCurrentNextAction =
-    !!phase.action && ticket.next_action === phase.action
-
-  return (
-    <li
-      className={cn(
-        'rounded-md px-2 py-1.5 text-sm',
-        isCurrent && 'bg-background ring-1 ring-primary/40',
-      )}
-    >
-      <div className="flex items-start gap-2">
-        <div className="flex flex-1 items-start gap-2">
-          <PhaseStatusIcon status={phase.status} />
-          <span className="flex-1">
-            <span className="font-medium">{phase.title}</span>
-            {phase.description ? (
-              <span className="ml-1 text-muted-foreground">
-                — {phase.description}
-              </span>
-            ) : null}
-          </span>
-          {isCurrent ? (
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
-              You're here
-            </span>
-          ) : null}
-          <PhaseCategoryPill category={phase.category} />
-        </div>
-      </div>
-      {phase.action ? (
-        <div className="mt-1 flex items-start gap-2 pl-5">
-          <ArrowRight
-            className="mt-1 h-3 w-3 shrink-0 text-muted-foreground"
-            aria-hidden
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm leading-snug">{phase.action}</p>
-            {phase.action_details ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {phase.action_details}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {isCurrent && onRefine ? (
-              <button
-                type="button"
-                onClick={onRefine}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <RefreshCcw className="h-3 w-3" aria-hidden />
-                Refine
-              </button>
-            ) : null}
-            <Button
-              type="button"
-              variant={isCurrentNextAction ? 'ghost' : 'outline'}
-              size="xs"
-              disabled={applying || isCurrentNextAction || !phase.action}
-              onClick={async () => {
-                if (!phase.action) return
-                setApplying(true)
-                try {
-                  await onSetNextAction(phase.action)
-                } finally {
-                  setApplying(false)
-                }
-              }}
-            >
-              {applying
-                ? 'Setting…'
-                : isCurrentNextAction
-                  ? 'Set'
-                  : 'Set as next action'}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {phase.definition_of_done.length > 0 ? (
-        <div className="mt-1.5 pl-5">
-          <PhaseDodChecklist ticket={ticket} state={state} phase={phase} compact />
-        </div>
-      ) : null}
-    </li>
-  )
-}
-
-// Per-phase DoD checklist. Compact mode (used inside PhaseRow) drops
-// the section header so the row stays scannable; the full version
-// (used at the assist panel level for the current phase) keeps the
-// "Definition of done" label so the user knows what they're ticking.
-function PhaseDodChecklist({
-  ticket,
-  state,
-  phase,
-  compact,
-}: {
-  ticket: Ticket
-  state: AssistState
-  phase: ShapePhaseEntry
-  compact?: boolean
-}) {
-  const [busyIdx, setBusyIdx] = useState<number | null>(null)
-  const items = phase.definition_of_done
-  if (items.length === 0) return null
-  const doneCount = items.filter((d) => d.done).length
-
-  async function toggle(i: number) {
-    if (busyIdx !== null) return
-    setBusyIdx(i)
-    try {
-      await togglePhaseDodItem(ticket, state, phase.id, i)
-    } catch (err) {
-      console.error('toggle phase dod failed', err)
-    } finally {
-      setBusyIdx(null)
-    }
-  }
-
-  return (
-    <div className={cn('space-y-1', compact ? '' : 'rounded-md border bg-background/40 px-2.5 py-2')}>
-      {!compact ? (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Definition of done · this phase
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            {doneCount}/{items.length}
-          </span>
-        </div>
-      ) : null}
-      <ul className="space-y-0.5">
-        {items.map((d, i) => (
-          <li key={`${phase.id}-${i}`} className="flex items-start gap-2">
-            <button
-              type="button"
-              onClick={() => void toggle(i)}
-              disabled={busyIdx !== null}
-              aria-pressed={d.done}
-              className={cn(
-                'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors',
-                d.done
-                  ? 'border-emerald-500 bg-emerald-500 text-white'
-                  : 'border-muted-foreground/40 bg-background hover:border-foreground/60',
-              )}
-              aria-label={d.done ? `Mark "${d.item}" not done` : `Mark "${d.item}" done`}
-            >
-              {d.done ? <CheckCircle2 className="h-3 w-3" /> : null}
-            </button>
-            <span
-              className={cn(
-                'text-[12px] leading-snug',
-                d.done && 'text-muted-foreground line-through decoration-muted-foreground/40',
-              )}
-            >
-              {d.item}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-function PhaseStatusIcon({ status }: { status: ShapePhaseStatus }) {
-  if (status === 'done')
-    return <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-primary" />
-  if (status === 'in_progress')
-    return <CircleDashed className="mt-0.5 h-3.5 w-3.5 text-primary" />
-  if (status === 'blocked')
-    return <XCircle className="mt-0.5 h-3.5 w-3.5 text-destructive" />
-  return <Circle className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
-}
-

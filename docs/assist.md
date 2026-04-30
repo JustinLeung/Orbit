@@ -15,10 +15,11 @@ Goal: turn "this open loop is fuzzy" into "here's the concrete next thing I'm do
 | `server/routes/assist-pre-mortem.ts` | One-shot Gemini call returning 3-5 risks phrased as questions for the planning surface's "Run pre-mortem" button. Stateless — never mutates `AssistState`; each accepted risk hits `addOpenQuestion` separately. |
 | `src/lib/contextConstraints.ts` / `server/lib/contextConstraints.ts` | Mirrored helpers (`extractConstraints`/`applyConstraints`) for the constraint pills. Pills persist into `ticket.context` inside a stable `<!-- orbit:constraints -->` marker block so the model can re-extract them. |
 | `src/lib/lockInPlan.ts` / `server/lib/lockInPlan.ts` | Mirrored pure helpers — `checkLockInPreconditions` gates the button; `computeLockInUpdates` decides which phase actions to add to the ticket DoD and which phase becomes `in_progress` after the lock-in. No model call. |
-| `src/components/tickets/ConstraintPills.tsx` | Pill row above the rail's phase list (Budget / Deadline / People / Effort). Renders only on the planning surface. |
+| `src/components/tickets/ConstraintPills.tsx` | Pill row used by `PlanningSurface` (Budget / Deadline / People / Effort). Persists into `ticket.context`. |
 | `src/components/tickets/PreMortemConfirmList.tsx` | One row per risk, each with "Capture" / "Skip". Capture goes through `addOpenQuestion`; skipping is local-only (the next pre-mortem run gets a fresh list). |
-| `src/components/tickets/agents/` | Per-`PhaseCategory` agent components. `index.ts` holds the `PHASE_AGENTS` registry + `resolveAgent` dispatcher. `types.ts` defines the `AgentProps` contract. `PlanningAgent.tsx` owns the interview flow; `DefaultAgent.tsx` is the static-form fallback used by every category without a bespoke entry. |
-| `src/components/tickets/TicketAssistPanel.tsx` | The inline UI inside `TicketDetailDialog`. Drives shape generation, phase selection, structured-question rendering, refines, "set as next action", and follow-up chat. |
+| `src/components/tickets/surfaces/` | Per-`PhaseCategory` "surface" components. `index.ts` holds the `PHASE_SURFACES` registry + `resolveSurface` dispatcher. `types.ts` defines the `SurfaceProps` contract. `PlanningSurface.tsx` owns the planning body (pills + pre-mortem + interview + lock-in). `DefaultSurface.tsx` is the fallback for every category without a bespoke entry — it dispatches to the per-category `agent` for its refine slot. |
+| `src/components/tickets/agents/` | Per-`PhaseCategory` agent components — one level *inside* the surface registry. The agent owns the refine sub-form for its category. `index.ts` holds the `PHASE_AGENTS` registry + `resolveAgent` dispatcher. `PlanningAgent.tsx` owns the interview flow; `DefaultAgent.tsx` is the static-form fallback. |
+| `src/components/tickets/TicketAssistPanel.tsx` | Thin shell. Owns shape bootstrap, error display, follow-up affordance, optimistic ticket mirror. Body is delegated to the resolved phase surface. |
 | `src/components/tickets/assistQuestions.ts` | Static catalog: per `PhaseCategory` → which structured questions to ask. Plus `formatStructuredAnswers()` which turns the user's answers into the `user_message` we send to the model. Used for non-planning categories. |
 | `src/components/tickets/DynamicQuestionForm.tsx` / `dynamicQuestionAnswer.ts` | UI for ONE model-asked question (multiple choice / multi-select / short text / long text). Used for planning-category phases where the model interviews the user instead of refining straight away. |
 | `src/components/tickets/PhaseCategoryPill.tsx` | Small label component for the six phase categories. |
@@ -256,87 +257,107 @@ and renders `DynamicQuestionForm`; future agents (doing's "I'm stuck"
 mini-interview, deciding's tiebreaker, closing's DoD walk) reuse the
 same wire/UI primitives by opting their playbooks in.
 
-## Planning surface affordances
+## Per-phase surfaces
 
-When the user is on a planning-category phase (or a freshly-shaped
-multi-step ticket where the first phase is planning), the rail grows
-three extra controls above the phase list. They cluster together
-because they all act on the *plan as a whole* rather than the active
-refine surface.
-
-### Constraint pills
-
-Four pills — **Budget**, **Deadline**, **People**, **Effort** — sit
-above the phase list. Tapping a pill opens a small popover with a
-kind-appropriate input (free-form text for budget/people, date for
-deadline, S/M/L/XL choice for effort).
-
-Filled values compile into `ticket.context` inside a stable marker
-block so they round-trip through the model and stay re-editable:
+The assist panel's body is dispatched by the current phase's
+`PhaseCategory`. The dispatcher (`src/components/tickets/surfaces/`)
+mirrors the per-phase agents pattern one level up: where an *agent*
+owns the refine sub-form, a *surface* owns the entire panel body —
+header, body, and any phase-shaped affordances.
 
 ```
-…whatever else is in context…
-
-<!-- orbit:constraints -->
-Budget: $500
-Deadline: 2026-05-20
-People: 8
-Effort: M
-<!-- /orbit:constraints -->
+TicketAssistPanel  (shell — bootstrap, error, follow-up)
+└── <PhaseSurface category={current.category} … />
+    ├── PlanningSurface   ← bespoke (pills + pre-mortem + interview + lock-in)
+    └── DefaultSurface    ← fallback (Help-with header + DoD + agent refine slot)
 ```
 
-The `extractConstraints`/`applyConstraints` helpers in
-`src/lib/contextConstraints.ts` (mirrored to
-`server/lib/contextConstraints.ts`) own the parse/replace. The block
-is always pinned to the END of `context` — the model treats `context`
-as append-style, so the marker block stays out of the way of the
-running narrative.
+Categories without a bespoke surface fall back to `DefaultSurface`,
+which itself dispatches to the per-category *agent* for its refine
+slot — preserving the pre-surface behavior 1:1 for
+research/doing/waiting/deciding/closing. Adding a bespoke surface is
+two files: a new component in `surfaces/`, and a one-line registry
+entry in `surfaces/index.ts`.
 
-Pills only render on the planning surface (predicate in
-`TicketPlanRail`). On other phases, constraint values still live in
-`context` but aren't surfaced as pills — they're just part of the
-free-form context the model sees.
+### `SurfaceProps` contract
 
-### "Run pre-mortem"
+Every surface receives the same props (`surfaces/types.ts`):
 
-Explicitly gated behind a button — **never auto-runs**. Clicking it
-hits `/api/assist/pre-mortem`, which returns 3-5 risks phrased as
-questions ("What if the venue cancels last minute?"). The
-`PreMortemConfirmList` renders one row per risk; the user clicks
-**Capture** (→ `addOpenQuestion`) or **Skip** (local-only) per row.
-There is no on-disk "skipped" registry — the next pre-mortem run
-produces a fresh list.
+- `ticket`, `state`, `phase` — the current ticket, assist state, and
+  resolved current phase entry.
+- `busy`, `loadingState`, `refiningOpen`, `isShapePhase`,
+  `lastAppliedFields` — UI state owned by the panel.
+- `onSetNextAction`, `onOpenRefine`, `onCancelRefine` — caller hooks
+  the panel exposes so the surface never needs to import
+  `updateTicket` / mutate panel state directly.
+- `onTicketChange?` — propagation callback when the surface mutates
+  the ticket itself (e.g. `PlanningSurface` does this for constraint
+  pill saves).
+- `runTurn({userMessage, advance})` — emits a turn through the model.
 
-The route is stateless: it never reads or writes `AssistState`. The
-plan + ticket snapshot go in, risks come out. Dedupe against the
-ticket's existing open questions happens server-side (case-insensitive
-normalized prompt), so you can run pre-mortem multiple times without
-the same questions piling up.
+The panel resets `refiningOpen` to false after a successful refine
+turn, mirroring the prior agent dispatcher's behavior.
 
-### "Lock in the plan"
+### `PlanningSurface` body
 
-A primary deterministic transition — **no model call**. The button is
-disabled until the precondition triple holds:
+The reading order encodes the flow we want users in: scope → risks →
+answer → commit. A single bordered surface inside the panel:
 
-- ticket has a non-empty `goal`
-- shape has at least 1 phase
-- ticket-level `definition_of_done` has at least 1 item
+1. **Header** — "Planning · <phase title>" + a one-line subhead.
+2. **Constraint pills** (`ConstraintPills`) — Budget / Deadline /
+   People / Effort. Click-to-open popovers, kind-appropriate inputs
+   (free text / date / scale). Values compile into `ticket.context`
+   inside a stable `<!-- orbit:constraints -->` marker block:
 
-Click → `lockInPlan` (`src/lib/queries.ts`) calls
-`computeLockInUpdates` (mirrored client/server) which:
+   ```
+   …whatever else is in context…
 
-1. Promotes each phase's `action` into the ticket-level
-   `definition_of_done`, skipping items already present (case-
-   insensitive). The diff is written through `updateTicket` with a
-   `field_updated` audit row.
-2. Flips the current planning phase to `done`, advances
-   `position.current_phase_id` to the first non-done phase. Persists
-   via `persistAssistState` with reason `lock_in_plan` so the activity
-   timeline records it.
+   <!-- orbit:constraints -->
+   Budget: $500
+   Deadline: 2026-05-20
+   People: 8
+   Effort: M
+   <!-- /orbit:constraints -->
+   ```
 
-The pure helper lives in its own file (mirrored to server) so the
-live eval can import it without crossing the src/server tsconfig
-boundary.
+   Mirrored helpers `extractConstraints`/`applyConstraints` in
+   `src/lib/contextConstraints.ts` ↔ `server/lib/contextConstraints.ts`
+   own the parse/replace. The block is always pinned to the END of
+   `context` so the model's append-style narrative isn't disturbed.
+
+3. **Pre-mortem** — gated behind a button (never auto-runs). Clicking
+   it hits `/api/assist/pre-mortem`, a stateless one-shot Gemini call
+   that returns 3-5 risks phrased as questions. The
+   `PreMortemConfirmList` renders one row per risk with **Capture** /
+   **Skip**. Capture goes through `addOpenQuestion`; skipping is
+   local-only (the next pre-mortem run gets a fresh list). Server-side
+   dedupe against the ticket's existing open questions means you can
+   run it multiple times without piling up duplicates.
+
+4. **Interview** — delegates to `PlanningAgent`, which renders the
+   model's `next_question` (one at a time) using
+   `DynamicQuestionForm`. The agent kicks off a turn on mount when
+   `wantInterview` is true (refining open or initial shape phase).
+
+5. **"Lock in the plan"** — a primary deterministic transition (no
+   model call). Disabled until the precondition triple holds:
+   - ticket has a non-empty `goal`
+   - shape has at least 1 phase
+   - ticket-level `definition_of_done` has at least 1 item
+
+   Click → `lockInPlan` (`src/lib/queries.ts`) calls
+   `computeLockInUpdates` (mirrored client/server) which:
+   1. Promotes each phase's `action` into the ticket-level
+      `definition_of_done`, skipping items already present
+      (case-insensitive). The diff is written through `updateTicket`
+      with a `field_updated` audit row.
+   2. Flips the current planning phase to `done`, advances
+      `position.current_phase_id` to the first non-done phase.
+      Persists via `persistAssistState` with reason `lock_in_plan` so
+      the activity timeline records it.
+
+The pure helper is in its own file (mirrored to server) so the live
+eval can import it without crossing the src/server tsconfig boundary.
 
 ## Planning is an interview, not a form
 
