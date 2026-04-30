@@ -10,6 +10,11 @@ import type { AgentProps } from './types'
 // so the model can ask its first question. The ref-keyed guard prevents
 // loops by tying kickoff to (phaseId, message-count, phase) — we
 // re-kickoff if the phase changes or the conversation moves forward.
+//
+// Pre-mortem, constraint pills, and Lock-in-the-plan are NOT owned by
+// this agent — they live in the rail's planning surface so they remain
+// visible across refine/idle states. This component stays focused on
+// the interview flow.
 export function PlanningAgent({
   state,
   phase,
@@ -69,8 +74,5 @@ export function PlanningAgent({
       </div>
     )
   }
-  // Idle: kickoff effect is about to fire OR the model returned without
-  // a question. Render nothing so the panel falls through to the
-  // "Refine action" affordance.
   return null
 }

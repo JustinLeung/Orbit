@@ -163,7 +163,15 @@ export function TicketDetailDialog({
               {/* ── Body: rails + centre ─────────────────────────────── */}
               <div className="flex min-h-0 flex-1">
                 {/* Left rail */}
-                <TicketPlanRail ticket={editing} saveField={saveField} />
+                <TicketPlanRail
+                  ticket={editing}
+                  saveField={saveField}
+                  onTicketChange={(next) =>
+                    setEditing((cur) =>
+                      cur && cur.id === next.id ? next : cur,
+                    )
+                  }
+                />
 
                 {/* Centre pane */}
                 <div className="flex min-w-0 flex-1 flex-col">

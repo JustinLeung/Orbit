@@ -350,6 +350,12 @@ keeps using `npm run seed` with its own custom data.
   jsonb checklist, plus first-class `ticket_open_questions` and
   `ticket_references` tables. Surfaced inline in the detail dialog and
   read/written by `/api/assist/walkthrough`. See ORB-21.
+- [x] Planning surface affordances — constraint pills (Budget /
+  Deadline / People / Effort) above the rail's phase list, a stateless
+  `/api/assist/pre-mortem` route that surfaces 3-5 risks the user can
+  accept individually as open questions, and a deterministic "Lock in
+  the plan" button that promotes phase actions into ticket DoD and
+  advances out of the planning phase. See ORB-28.
 - [ ] People CRUD + per-person ticket list
 - [ ] Assist mode on existing tickets → Gemini, writing into `agent_runs`
 - [ ] Review queue UI for agent output
