@@ -3,24 +3,35 @@ import { Type } from '@google/genai'
 import { getGemini, GEMINI_MODEL } from '../lib/gemini.js'
 import type { TicketSnapshot } from '../lib/assistTypes.js'
 
-// "Pre-mortem" — a one-shot Gemini call that asks "what could go wrong?"
-// and returns a list of risks phrased as questions. Distinct from the
-// /walkthrough route because it's NOT part of the rolling shape→refine
-// state machine: it never mutates AssistState, and the user accepts
-// proposals individually (each becomes an `addOpenQuestion` call on the
+// Unblockers helper — a one-shot Gemini call that surfaces 3-5
+// open questions which, if answered, would let the user TAKE THE NEXT
+// CONCRETE STEP on this loop. Distinct from the /walkthrough route
+// because it's NOT part of the rolling shape→refine state machine: it
+// never mutates AssistState, and the user accepts proposals
+// individually (each becomes an `addOpenQuestion` call on the
 // client). Gating: the panel only fires this when the user explicitly
-// clicks "Run pre-mortem" — never auto-runs.
+// clicks "Suggest unblockers" — never auto-runs.
+//
+// Framing note: we deliberately DON'T frame this as risk / failure-
+// mode / "what could go wrong" / "what people forget." Those are all
+// backward-looking (catch the mistake before it bites). This is
+// FORWARD-looking: identify the unknowns whose resolution unlocks
+// movement, so the user can act. The endpoint name is legacy
+// (/assist/pre-mortem) but the prompt and UI both speak in
+// "what'll unblock the next move" language.
 
 const router = Router()
 
-const SYSTEM_INSTRUCTION = `You are Orbit's "pre-mortem" helper. The user has just sketched a plan for an open loop. Your job is to surface 3-5 risks worth catching BEFORE they bite.
+const SYSTEM_INSTRUCTION = `You are Orbit's "unblockers" helper. The user has just sketched a plan for an open loop and is about to start executing it. Your job is to surface 3-5 questions that, if the user answered them today, would unblock the very next concrete move on this loop. Forward-looking, action-oriented — NOT risk analysis or "what could go wrong."
+
+Each item should pass this test: "If the user answered this right now, what concrete action could they take that they CAN'T take yet?" If the answer is "nothing actionable," cut it.
 
 Output rules:
-- Each risk MUST be phrased AS A QUESTION (something the user could realistically not have thought about yet). Examples: "What if the venue cancels last-minute?", "What happens if Sam doesn't reply by Friday?", "Are we sure the budget covers tax and tip?".
-- 3-5 risks. Quality over quantity. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
-- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Don't emit generic risks like "What if something goes wrong?".
-- Cover a spread: at least one of {dependency on a person}, {timing/deadline}, {budget/resources}, {scope/quality}, {failure recovery} where the ticket gives you fodder.
-- Tone: brief, neutral. Never alarmist. The user picks which to capture.
+- Each item MUST be phrased AS A QUESTION the user could realistically answer (or know who to ask) today. Examples that PASS the unblocker test: "Which of the three venues fits the budget?" → unlocks "book it." / "Is Sam free on the 16th or do we need a different date?" → unlocks "send invites." / "Per-person or total budget?" → unlocks "decide on catering tier." Examples that FAIL: "What if it rains?" (risk, not action), "Have you considered guest comfort?" (vague, no resulting move), "What if the venue cancels?" (catastrophizing).
+- 3-5 items. Quality over quantity. Each should map to a different next-move. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
+- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Reference specific phases by name when the unblocker is for a particular phase.
+- Prefer questions that surface MISSING DECISIONS or MISSING INFORMATION over questions that surface preferences. Decisions/info unblock action; preferences usually don't.
+- Tone: warm, direct, momentum-oriented — like a colleague who's helping you figure out what to do next, not what to worry about. The user picks which to capture as open questions.
 - NEVER invent facts (names, dates, dollar amounts not in the ticket). Use the user's own words where possible.`
 
 const responseSchema = {
@@ -110,7 +121,7 @@ function buildPrompt(
   }
   lines.push(
     '',
-    'Now produce 3-5 risks phrased as questions. Specific to this ticket. Cover a spread of dependency / timing / budget / scope / recovery where there is fodder.',
+    "Now produce 3-5 questions whose answers would UNBLOCK the next concrete move on this loop. Specific to this ticket and plan. Each question must pass the test: 'If the user answers this today, can they take an action they can't take yet?' If you can't name the action, cut the question. Forward-looking momentum, not risk analysis.",
   )
   return lines.join('\n')
 }

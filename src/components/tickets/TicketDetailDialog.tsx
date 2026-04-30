@@ -163,15 +163,7 @@ export function TicketDetailDialog({
               {/* ── Body: rails + centre ─────────────────────────────── */}
               <div className="flex min-h-0 flex-1">
                 {/* Left rail */}
-                <TicketPlanRail
-                  ticket={editing}
-                  saveField={saveField}
-                  onTicketChange={(next) =>
-                    setEditing((cur) =>
-                      cur && cur.id === next.id ? next : cur,
-                    )
-                  }
-                />
+                <TicketPlanRail ticket={editing} saveField={saveField} />
 
                 {/* Centre pane */}
                 <div className="flex min-w-0 flex-1 flex-col">
@@ -280,8 +272,9 @@ export function TicketDetailDialog({
                       />
                     )}
 
-                    {/* Assist — refine flow + follow-up. Plan is suppressed
-                        because the left rail owns it. */}
+                    {/* Assist — per-phase surface dispatcher (planning,
+                        research, doing, …) + follow-up. The left rail
+                        owns the plan visualization itself. */}
                     <div className="mt-6">
                       <TicketAssistPanel
                         ticket={editing}
@@ -290,7 +283,6 @@ export function TicketDetailDialog({
                             cur && cur.id === next.id ? next : cur,
                           )
                         }
-                        hideActions
                       />
                     </div>
 
