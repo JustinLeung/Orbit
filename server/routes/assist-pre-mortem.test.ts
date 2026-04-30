@@ -54,18 +54,18 @@ describe('POST /api/assist/pre-mortem', () => {
     expect(res.status).toBe(503)
   })
 
-  it('returns blind-spot items when the model produces a clean payload', async () => {
+  it('returns unblocker items when the model produces a clean payload', async () => {
     process.env.GEMINI_API_KEY = 'k'
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         risks: [
           {
-            question: "Have you thought about who's actually attending vs invited?",
+            question: 'Which of the three venues fits the budget?',
             rationale: null,
           },
           {
-            question: 'Is the budget per-person or total?',
-            rationale: 'Easy to forget when scoping early.',
+            question: 'Is Sam free on the 16th, or do we need a different date?',
+            rationale: 'Date confirmation unblocks invites.',
           },
         ],
       }),
@@ -76,7 +76,7 @@ describe('POST /api/assist/pre-mortem', () => {
       .send({ ticket: TICKET })
     expect(res.status).toBe(200)
     expect(res.body.risks).toHaveLength(2)
-    expect(res.body.risks[0].question).toMatch(/attending/)
+    expect(res.body.risks[0].question).toMatch(/venues/)
   })
 
   it('drops items whose prompt duplicates an existing open question', async () => {
@@ -84,8 +84,8 @@ describe('POST /api/assist/pre-mortem', () => {
     generateContent.mockResolvedValueOnce({
       text: JSON.stringify({
         risks: [
-          { question: 'Is the budget per-person or total?' },
-          { question: 'Where will dietary restrictions come from?' },
+          { question: 'Which of the three venues fits the budget?' },
+          { question: 'What date works for the venue and Sam?' },
         ],
       }),
     })
@@ -96,13 +96,17 @@ describe('POST /api/assist/pre-mortem', () => {
         ticket: {
           ...TICKET,
           open_questions: [
-            { question: 'is the budget per-person or total', resolved: false, resolution: null },
+            {
+              question: 'which of the three venues fits the budget',
+              resolved: false,
+              resolution: null,
+            },
           ],
         },
       })
     expect(res.status).toBe(200)
     expect(res.body.risks).toHaveLength(1)
-    expect(res.body.risks[0].question).toMatch(/dietary/)
+    expect(res.body.risks[0].question).toMatch(/date/)
   })
 
   it('caps the list at 5 even if the model returns more', async () => {

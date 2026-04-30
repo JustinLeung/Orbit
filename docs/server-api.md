@@ -101,7 +101,7 @@ Special case: if `advance: true` would push the phase to `'done'`, the route sho
 
 ### `POST /api/assist/pre-mortem`
 
-A one-shot Gemini call that surfaces 3-5 "things people often miss" for a planned open loop, phrased as warm, curious questions ("Have you thought about who's actually attending vs invited?", "Is the budget per-person or total?"). Deliberately framed as blind-spots/oversights, NOT failure modes ("what could go wrong"); same mechanic, friendlier landing for solo productivity. The route name is legacy.
+A one-shot Gemini call that surfaces 3-5 questions whose answers would **unblock the user's next concrete move** on the loop ("Which of the three venues fits the budget?", "Is Sam free on the 16th?"). Forward-looking and momentum-oriented; explicitly NOT failure-mode / risk / "what could go wrong" framing. Each item is gated against an "if-the-user-answers-this-can-they-act" test in the prompt. The route name is legacy.
 
 Distinct from `/walkthrough` because it does NOT mutate `AssistState` — capturing an item is a separate `addOpenQuestion` call decided by the user, one row at a time. Gated by `requireUser()`.
 
@@ -125,7 +125,7 @@ Status codes:
 - `502` — Gemini returned empty text or malformed JSON.
 - `500` — generic Gemini failure.
 
-Items are deduped against the ticket's existing `open_questions` (case-insensitive normalized prompt) and capped at 5. The client triggers this endpoint **only** when the user clicks "Surface blind spots" on the planning surface — never auto-runs.
+Items are deduped against the ticket's existing `open_questions` (case-insensitive normalized prompt) and capped at 5. The client triggers this endpoint **only** when the user clicks "Suggest unblockers" on the planning surface — never auto-runs.
 
 ## Server libs
 

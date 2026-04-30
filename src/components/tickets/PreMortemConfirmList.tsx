@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, HelpCircle, Loader2, X } from 'lucide-react'
+import { ArrowRight, Check, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { addOpenQuestion } from '@/lib/queries'
@@ -56,7 +56,7 @@ export function PreMortemConfirmList({
   if (risks.length === 0) {
     return (
       <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
-        Nothing obvious to surface. Try editing the plan or revisit later.
+        Nothing obvious to suggest. Try editing the plan or revisit later.
       </div>
     )
   }
@@ -64,9 +64,9 @@ export function PreMortemConfirmList({
   return (
     <div className="space-y-2 rounded-md border bg-background p-2.5">
       <div className="flex items-center gap-1.5 px-1">
-        <HelpCircle className="h-3.5 w-3.5 text-primary" aria-hidden />
+        <ArrowRight className="h-3.5 w-3.5 text-primary" aria-hidden />
         <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Things people often miss for this kind of loop
+          Answer these to unblock the next move
         </span>
       </div>
       <ul className="space-y-1.5">

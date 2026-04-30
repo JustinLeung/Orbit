@@ -3,33 +3,35 @@ import { Type } from '@google/genai'
 import { getGemini, GEMINI_MODEL } from '../lib/gemini.js'
 import type { TicketSnapshot } from '../lib/assistTypes.js'
 
-// Blind-spots helper — a one-shot Gemini call that surfaces 3-5
-// "things people often miss" for a planned open loop, phrased as
-// questions the user can capture as open_questions. Distinct from the
-// /walkthrough route because it's NOT part of the rolling shape→refine
-// state machine: it never mutates AssistState, and the user accepts
-// proposals individually (each becomes an `addOpenQuestion` call on
-// the client). Gating: the panel only fires this when the user
-// explicitly clicks "Surface blind spots" — never auto-runs.
+// Unblockers helper — a one-shot Gemini call that surfaces 3-5
+// open questions which, if answered, would let the user TAKE THE NEXT
+// CONCRETE STEP on this loop. Distinct from the /walkthrough route
+// because it's NOT part of the rolling shape→refine state machine: it
+// never mutates AssistState, and the user accepts proposals
+// individually (each becomes an `addOpenQuestion` call on the
+// client). Gating: the panel only fires this when the user explicitly
+// clicks "Suggest unblockers" — never auto-runs.
 //
-// Framing note: we deliberately DON'T frame this as failure-mode /
-// "what could go wrong" / pre-mortem. For solo productivity, "what
-// did you forget" lands better than "imagine you failed" — same
-// mechanic, less catastrophizing. The endpoint is named
-// /assist/pre-mortem for backwards compatibility, but the prompt and
-// UI both speak in "blind spots / oversights / things people forget"
-// language.
+// Framing note: we deliberately DON'T frame this as risk / failure-
+// mode / "what could go wrong" / "what people forget." Those are all
+// backward-looking (catch the mistake before it bites). This is
+// FORWARD-looking: identify the unknowns whose resolution unlocks
+// movement, so the user can act. The endpoint name is legacy
+// (/assist/pre-mortem) but the prompt and UI both speak in
+// "what'll unblock the next move" language.
 
 const router = Router()
 
-const SYSTEM_INSTRUCTION = `You are Orbit's "blind spots" helper. The user has just sketched a plan for an open loop. Your job is to surface 3-5 things people commonly forget or overlook for THIS kind of loop — pieces of the picture that are easy to miss, NOT predictions of failure.
+const SYSTEM_INSTRUCTION = `You are Orbit's "unblockers" helper. The user has just sketched a plan for an open loop and is about to start executing it. Your job is to surface 3-5 questions that, if the user answered them today, would unblock the very next concrete move on this loop. Forward-looking, action-oriented — NOT risk analysis or "what could go wrong."
+
+Each item should pass this test: "If the user answered this right now, what concrete action could they take that they CAN'T take yet?" If the answer is "nothing actionable," cut it.
 
 Output rules:
-- Each item MUST be phrased AS A QUESTION the user could realistically not have considered yet. Use neutral, curious phrasing — NOT alarmist or failure-framed. Good: "Have you thought about who's actually attending vs invited?" / "Is the budget per-person or total?" / "Where's the marriage license going to come from?". Bad: "What if everyone cancels?" / "What if you fail?" / "What could go wrong?".
-- 3-5 items. Quality over quantity. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
-- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Don't emit generic items like "Have you thought about everything?".
-- Cover a spread of "things people forget" where the ticket gives you fodder: {logistics/details easy to skip}, {someone whose input matters}, {a dependency the user hasn't named}, {a constraint they haven't set yet}, {something that has to happen alongside the plan but isn't a phase}.
-- Tone: warm, helpful, like a thoughtful friend who's done this before. Never anxious or alarmist. The user picks which to capture.
+- Each item MUST be phrased AS A QUESTION the user could realistically answer (or know who to ask) today. Examples that PASS the unblocker test: "Which of the three venues fits the budget?" → unlocks "book it." / "Is Sam free on the 16th or do we need a different date?" → unlocks "send invites." / "Per-person or total budget?" → unlocks "decide on catering tier." Examples that FAIL: "What if it rains?" (risk, not action), "Have you considered guest comfort?" (vague, no resulting move), "What if the venue cancels?" (catastrophizing).
+- 3-5 items. Quality over quantity. Each should map to a different next-move. NEVER repeat a question already in the ticket's open_questions list (it's shown to you).
+- Be SPECIFIC to the ticket — use details from the title, description, context, and the current plan. Reference specific phases by name when the unblocker is for a particular phase.
+- Prefer questions that surface MISSING DECISIONS or MISSING INFORMATION over questions that surface preferences. Decisions/info unblock action; preferences usually don't.
+- Tone: warm, direct, momentum-oriented — like a colleague who's helping you figure out what to do next, not what to worry about. The user picks which to capture as open questions.
 - NEVER invent facts (names, dates, dollar amounts not in the ticket). Use the user's own words where possible.`
 
 const responseSchema = {
@@ -119,7 +121,7 @@ function buildPrompt(
   }
   lines.push(
     '',
-    "Now produce 3-5 things people commonly miss for THIS kind of loop, phrased as warm, curious questions. Specific to this ticket. Cover a spread where there's fodder: a logistics detail that's easy to skip, a person whose input matters, an unnamed dependency, a constraint not yet set, or something that has to happen alongside the plan.",
+    "Now produce 3-5 questions whose answers would UNBLOCK the next concrete move on this loop. Specific to this ticket and plan. Each question must pass the test: 'If the user answers this today, can they take an action they can't take yet?' If you can't name the action, cut the question. Forward-looking momentum, not risk analysis.",
   )
   return lines.join('\n')
 }
