@@ -49,7 +49,7 @@ export function TicketAssistPanel({
   // Mirror the prop ticket into local state so we can show optimistic
   // updates from runAssistTurn / setNextAction without waiting for the
   // parent to refetch. Sync on prop change using the same render-time
-  // pattern as TicketDetailDialog (avoids set-state-in-effect).
+  // pattern as TicketDetailView (avoids set-state-in-effect).
   const [liveTicket, setLiveTicket] = useState<Ticket>(ticket)
   const [trackedTicketId, setTrackedTicketId] = useState(ticket.id)
   if (ticket.id !== trackedTicketId) {

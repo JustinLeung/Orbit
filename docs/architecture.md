@@ -75,9 +75,9 @@ Anything `VITE_*` is baked into the JS bundle at build time — changing those v
 
 There's no centralized client store. Hooks in `src/lib/queries.ts` each own a `useReducer`-backed fetch lifecycle (`fetchReducer`) and listen on **window CustomEvents** for refresh:
 
-- `orbit:tickets-changed` — fires after `createTicket`/`updateTicket`. List hooks (`useTicketsByStatus`, `useNowTickets`, `useStuckTickets`) re-fetch.
-- `orbit:assist-changed` — fires after `runAssistTurn`/`persistAssistState`. The detail dialog's `useLatestAssistState` re-reads.
-- `orbit:open-questions-changed`, `orbit:references-changed`, `orbit:ticket-events-changed` — per-section refreshes inside the detail dialog.
+- `orbit:tickets-changed` — fires after `createTicket`/`updateTicket`. List hooks (`useTicketsByStatus`, `useNowTickets`, `useStuckTickets`, `useAllTickets`, `useTicketByShortId`) re-fetch.
+- `orbit:assist-changed` — fires after `runAssistTurn`/`persistAssistState`. The non-modal detail view's `useLatestAssistState` re-reads.
+- `orbit:open-questions-changed`, `orbit:references-changed`, `orbit:ticket-events-changed` — per-section refreshes inside the detail view.
 - `useTicketEvents` listens on **all three** of `tickets-changed`, `assist-changed`, `ticket-events-changed`, because each writes into `ticket_events`.
 
 This keeps every page/section as an independent fetcher without a global cache, but the trade-off is that any mutation must remember to fire the right event. Search for `notifyTicketsChanged`/`notifyAssistChanged`/etc. when adding new write paths.
@@ -85,7 +85,7 @@ This keeps every page/section as an independent fetcher without a global cache, 
 ## Per-area deep dives
 
 - [auth.md](./auth.md) — sign-in flow (OTP / magic link / Google) and request authentication.
-- [tickets.md](./tickets.md) — the core ticket model, the detail dialog, status transitions, history.
+- [tickets.md](./tickets.md) — the core ticket model, the non-modal detail view, status transitions, history.
 - [assist.md](./assist.md) — the structured Shape → refine walkthrough.
 - [server-api.md](./server-api.md) — Express routes, middleware, secret handling.
 - [database.md](./database.md) — schema, RLS, migrations, the onboarding RPC.

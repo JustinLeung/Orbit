@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
+import { useTicketTabs } from '@/lib/ticketTabs'
 import { STATUS_OPTIONS } from '@/components/tickets/form-constants'
 import {
   PropertyMenu,
@@ -61,7 +62,13 @@ export function TicketList({
   // where the status grouping is implied or not useful).
   groupBy?: 'status' | 'none'
 }) {
-  const [selected, setSelected] = useState<Ticket | null>(null)
+  const navigate = useNavigate()
+  const { openTab } = useTicketTabs()
+
+  function openInTab(ticket: Ticket) {
+    openTab(ticket.short_id)
+    navigate(`/loop/${ticket.short_id}`)
+  }
 
   // Group + order even when "none" — it lets us reuse the same row code.
   const groups = useMemo(() => {
@@ -99,25 +106,16 @@ export function TicketList({
   }
 
   return (
-    <>
-      <div className="divide-y">
-        {groups.map((group, idx) => (
-          <TicketGroup
-            key={String(group.status ?? 'all') + idx}
-            status={group.status}
-            items={group.items}
-            onSelect={setSelected}
-          />
-        ))}
-      </div>
-      <TicketDetailDialog
-        ticket={selected}
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null)
-        }}
-      />
-    </>
+    <div className="divide-y">
+      {groups.map((group, idx) => (
+        <TicketGroup
+          key={String(group.status ?? 'all') + idx}
+          status={group.status}
+          items={group.items}
+          onSelect={openInTab}
+        />
+      ))}
+    </div>
   )
 }
 

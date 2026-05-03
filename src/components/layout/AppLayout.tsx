@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/useAuth'
 import { CreateTicketProvider } from '@/lib/createTicket'
 import { useCreateTicket } from '@/lib/useCreateTicket'
+import { TicketTabsProvider } from '@/lib/ticketTabsProvider'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -90,13 +91,31 @@ function Sidebar() {
 
 export function AppLayout() {
   return (
-    <CreateTicketProvider>
-      <div className="flex min-h-svh">
-        <Sidebar />
-        <main className="flex-1 overflow-auto">
-          <Outlet />
-        </main>
-      </div>
-    </CreateTicketProvider>
+    <TicketTabsProvider>
+      <CreateTicketProvider>
+        {/* h-svh on the shell pins the layout to the viewport so the
+            non-modal loop view can run its own internal scroll regions
+            (tab strip + body + right rail) without competing with a
+            page-level scrollbar. List pages scroll inside the
+            `ScrollLayout` route below. */}
+        <div className="flex h-svh">
+          <Sidebar />
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
+      </CreateTicketProvider>
+    </TicketTabsProvider>
+  )
+}
+
+// Wrapper for routes whose pages assume the parent scrolls (Inbox, Now,
+// Waiting, …). The loop route doesn't use this — it owns its own scroll
+// regions internally.
+export function ScrollLayout() {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <Outlet />
+    </div>
   )
 }
