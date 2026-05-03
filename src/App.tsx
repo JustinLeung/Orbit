@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequireAuth } from '@/components/auth/RequireAuth'
-import { AppLayout } from '@/components/layout/AppLayout'
+import { AppLayout, ScrollLayout } from '@/components/layout/AppLayout'
 import { InboxPage } from '@/pages/InboxPage'
 import { NowPage } from '@/pages/NowPage'
 import { WaitingPage } from '@/pages/WaitingPage'
@@ -9,6 +9,7 @@ import { ReviewPage } from '@/pages/ReviewPage'
 import { StuckPage } from '@/pages/StuckPage'
 import { PeoplePage } from '@/pages/PeoplePage'
 import { LoginPage } from '@/pages/LoginPage'
+import { LoopPage } from '@/pages/LoopPage'
 
 function App() {
   return (
@@ -23,13 +24,16 @@ function App() {
         }
       >
         <Route index element={<Navigate to="/now" replace />} />
-        <Route path="inbox" element={<InboxPage />} />
-        <Route path="now" element={<NowPage />} />
-        <Route path="waiting" element={<WaitingPage />} />
-        <Route path="follow-up" element={<FollowUpPage />} />
-        <Route path="review" element={<ReviewPage />} />
-        <Route path="stuck" element={<StuckPage />} />
-        <Route path="people" element={<PeoplePage />} />
+        <Route element={<ScrollLayout />}>
+          <Route path="inbox" element={<InboxPage />} />
+          <Route path="now" element={<NowPage />} />
+          <Route path="waiting" element={<WaitingPage />} />
+          <Route path="follow-up" element={<FollowUpPage />} />
+          <Route path="review" element={<ReviewPage />} />
+          <Route path="stuck" element={<StuckPage />} />
+          <Route path="people" element={<PeoplePage />} />
+        </Route>
+        <Route path="loop/:shortId" element={<LoopPage />} />
       </Route>
     </Routes>
   )

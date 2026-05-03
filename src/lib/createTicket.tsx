@@ -5,31 +5,37 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { TicketCreateInline } from '@/components/tickets/TicketCreateInline'
-import { TicketDetailDialog } from '@/components/tickets/TicketDetailDialog'
+import { useTicketTabs } from '@/lib/ticketTabs'
 import { CreateTicketContext } from '@/lib/useCreateTicket'
 import type { Ticket, TicketStatus } from '@/types/orbit'
 
 // Capture flow: title-only modal → on submit, ticket gets created and the
-// detail dialog opens for it (where the assist panel takes over). The
-// previous "manual full form" path has been retired in favor of editing
-// fields inline inside the detail dialog.
+// non-modal detail view opens for it via `/loop/:shortId` (where the
+// assist panel takes over). The previous "manual full form" path has
+// been retired in favor of editing fields inline inside the detail view.
 export function CreateTicketProvider({ children }: { children: ReactNode }) {
   const [captureOpen, setCaptureOpen] = useState(false)
   const [defaultStatus, setDefaultStatus] = useState<TicketStatus | undefined>(
     undefined,
   )
-  const [openedTicket, setOpenedTicket] = useState<Ticket | null>(null)
+  const navigate = useNavigate()
+  const { openTab } = useTicketTabs()
 
   const openCreate = useCallback((status?: TicketStatus) => {
     setDefaultStatus(status)
     setCaptureOpen(true)
   }, [])
 
-  const handleCreated = useCallback((ticket: Ticket) => {
-    setCaptureOpen(false)
-    setOpenedTicket(ticket)
-  }, [])
+  const handleCreated = useCallback(
+    (ticket: Ticket) => {
+      setCaptureOpen(false)
+      openTab(ticket.short_id)
+      navigate(`/loop/${ticket.short_id}`)
+    },
+    [navigate, openTab],
+  )
 
   // Global "n" shortcut to start ticket capture — ignored while typing.
   useEffect(() => {
@@ -63,13 +69,6 @@ export function CreateTicketProvider({ children }: { children: ReactNode }) {
         onOpenChange={setCaptureOpen}
         onCreated={handleCreated}
         defaultStatus={defaultStatus}
-      />
-      <TicketDetailDialog
-        ticket={openedTicket}
-        open={openedTicket !== null}
-        onOpenChange={(open) => {
-          if (!open) setOpenedTicket(null)
-        }}
       />
     </CreateTicketContext.Provider>
   )

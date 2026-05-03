@@ -42,12 +42,16 @@ import type {
   TicketUpdate,
 } from '@/types/orbit'
 
-// Vertical step rail + properties stack. Replaces the right-hand
-// PropertiesSidebar with a left rail that puts the plan front-and-centre:
-// numbered timeline, drag-handle reorder, click-to-pick-current, hover
-// "Set as next" affordance per row. Properties live underneath so they
-// stay reachable without splitting the modal into a third column just
-// for them.
+// Vertical step rail + (optionally) a properties stack underneath. The
+// rail has two presentations:
+//
+//   - variant="dialog": left-side rail with the full properties stack
+//     (Status / Type / Importance / Energy / Schedule / stamps) below
+//     the plan. Used historically by the modal detail dialog.
+//   - variant="detail": right-side rail used by the non-modal
+//     `TicketDetailView`. Plan only; properties move into a horizontal
+//     pill row in the body. A compact created/updated footer takes the
+//     place of the properties stack so timestamps stay reachable.
 
 export type SaveField = <K extends keyof Ticket>(
   field: K,
@@ -55,12 +59,16 @@ export type SaveField = <K extends keyof Ticket>(
   patch: TicketUpdate,
 ) => Promise<void>
 
+export type TicketPlanRailVariant = 'dialog' | 'detail'
+
 export function TicketPlanRail({
   ticket,
   saveField,
+  variant = 'dialog',
 }: {
   ticket: Ticket
   saveField: SaveField
+  variant?: TicketPlanRailVariant
 }) {
   const { data: assistState } = useLatestAssistState(ticket.id)
   const phases: ShapePhaseEntry[] = assistState?.shape?.phases ?? []
@@ -221,7 +229,12 @@ export function TicketPlanRail({
   return (
     <aside
       data-rail-instance="1"
-      className="hidden w-[288px] shrink-0 flex-col overflow-y-auto border-r bg-muted/20 lg:flex"
+      className={cn(
+        'hidden shrink-0 flex-col overflow-y-auto bg-muted/20 lg:flex',
+        variant === 'detail'
+          ? 'w-[300px] border-l'
+          : 'w-[288px] border-r',
+      )}
     >
       {/* Plan header — always present, shows progress even before bootstrap. */}
       <div className="border-b px-3 py-3">
@@ -356,9 +369,30 @@ export function TicketPlanRail({
         )}
       </div>
 
-      {/* Properties stack — Properties / Schedule / Assist / stamps. */}
-      <PropertiesPanel ticket={ticket} saveField={saveField} />
+      {/* Footer — properties stack in the dialog, slim stamps row in the
+          non-modal detail view (where properties live as pill row in the
+          body instead). */}
+      {variant === 'dialog' ? (
+        <PropertiesPanel ticket={ticket} saveField={saveField} />
+      ) : (
+        <StampsFooter ticket={ticket} />
+      )}
     </aside>
+  )
+}
+
+// Compact "Created / Updated / Closed" footer for the detail-view rail.
+// In the modal these stamps live inside `PropertiesPanel`; the non-modal
+// rail drops PropertiesPanel so we surface them on their own.
+function StampsFooter({ ticket }: { ticket: Ticket }) {
+  return (
+    <div className="mt-auto space-y-0.5 border-t px-3 py-2 text-[10.5px] text-muted-foreground">
+      <Stamp label="Created" value={formatDateLong(ticket.created_at)} />
+      <Stamp label="Updated" value={formatDateLong(ticket.updated_at)} />
+      {ticket.closed_at ? (
+        <Stamp label="Closed" value={formatDateLong(ticket.closed_at)} />
+      ) : null}
+    </div>
   )
 }
 

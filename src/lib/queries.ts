@@ -194,6 +194,45 @@ export function usePeople() {
   )
 }
 
+// All tickets, ordered by most recently updated. Used by the tab-bar's
+// jump-to-loop popover so any open loop is reachable without first
+// navigating to its list view.
+export function useAllTickets() {
+  return useTicketAsync<Ticket[]>(
+    async () => {
+      const { data, error } = await supabase
+        .from('tickets')
+        .select('*')
+        .order('updated_at', { ascending: false })
+      if (error) throw error
+      return data ?? []
+    },
+    [],
+    [],
+    { listen: true },
+  )
+}
+
+// Look up a single ticket by its per-user `short_id` (the integer surfaced
+// in the UI as `#N`). Used by the /loop/:shortId route.
+export function useTicketByShortId(shortId: number | null) {
+  return useTicketAsync<Ticket | null>(
+    async () => {
+      if (shortId == null || Number.isNaN(shortId)) return null
+      const { data, error } = await supabase
+        .from('tickets')
+        .select('*')
+        .eq('short_id', shortId)
+        .maybeSingle()
+      if (error) throw error
+      return data ?? null
+    },
+    [shortId],
+    null,
+    { listen: true },
+  )
+}
+
 // createTicket inserts the ticket and a `ticket_created` event in sequence.
 // We don't wrap in a transaction because Supabase's REST API doesn't expose
 // one — the event insert failing is non-fatal for the ticket but logged.
